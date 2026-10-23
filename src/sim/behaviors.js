@@ -14,15 +14,26 @@ const warnPower = (ctx, v, ok, vcc = 'VCC', gnd = 'GND') => {
 const attr = (ctx, k, d) => (ctx.part.attrs?.[k] ?? d);
 
 // ---------- passive / outputs ----------
-const resistor = (ctx) => ({ weak: () => [[ctx.n('1'), ctx.n('2')]] });
+const resistor = (ctx) => ({ weak: () => [[ctx.n('1'), ctx.n('2'), +attr(ctx, 'value', 220) || 220]] });   // 3rd entry: ohms (used by RC parts)
+
+// LED brightness ~ forward voltage above ~1.5 V. A PWM-driven LED sees full-voltage pulses: its brightness follows the
+// duty cycle (average / pulse level) even when the average voltage alone would be below the forward voltage.
+const ledLevel = (ctx, anodeNet, cathodeNet, inverted = false) => {
+  const v = ctx.sim.last; if (!v) return 0;
+  const a = v.v(anodeNet), c = v.v(cathodeNet);
+  if (!live(a) || !live(c)) return 0;
+  const pa = v.peak?.(anodeNet), pc = v.peak?.(cathodeNet);
+  if (!inverted && pa != null && pa > 0) { const d = pa - c; return d > 0.3 ? clamp((a / pa) * d) : 0; }
+  if (inverted && pc != null && pc > 0) { const d = a - 0; const duty = 1 - c / pc; return a - 0 > 0.3 ? clamp(duty * d) : 0; }
+  const d = a - c; return d > 0.3 ? clamp(d) : 0;
+};
 
 const led = (ctx) => ({
   render(v) {
     const a = v(ctx.n('A')), c = v(ctx.n('C'));
     let b = 0;
     if (live(a) && live(c)) {
-      const d = a - c;
-      b = d > 0.3 ? clamp(d) : 0;
+      b = ledLevel(ctx, ctx.n('A'), ctx.n('C'));
       if (b > 0.5 && ctx.sim.circuitStrong(ctx.n('A')) && ctx.sim.circuitStrong(ctx.n('C')))
         ctx.sim.warn(`led-${ctx.part.id}`, `${ctx.label}: tidak ada resistor pembatas arus, LED bisa terbakar. Tambahkan resistor 220 Ω.`);
     }
@@ -33,7 +44,7 @@ const led = (ctx) => ({
 const rgbLed = (ctx) => ({
   render(v) {
     const com = v(ctx.n('COM')), anode = attr(ctx, 'common', 'cathode') === 'anode';
-    const ch = (pin) => { const x = v(ctx.n(pin)); if (!live(x) || !live(com)) return 0; const d = anode ? com - x : x - com; return d > 0.3 ? clamp(d) : 0; };
+    const ch = (pin) => (anode ? ledLevel(ctx, ctx.n('COM'), ctx.n(pin), true) : ledLevel(ctx, ctx.n(pin), ctx.n('COM')));
     ctx.el.ledRed = ch('R'); ctx.el.ledGreen = ch('G'); ctx.el.ledBlue = ch('B');
   },
 });

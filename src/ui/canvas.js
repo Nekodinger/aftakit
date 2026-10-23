@@ -15,7 +15,7 @@ const ID_BASE = {
   'x-breadboard-half': 'bb', 'x-breadboard-mini': 'bb', 'mod-oled-i2c': 'oled',
 };
 const SIGNAL_COLORS = ['#f5a524', '#2fbf71', '#3d8bfd', '#a855f7', '#06b6d4', '#f43f5e', '#84cc16', '#fb923c'];
-const baseName = (p) => p.split('.')[0];
+const baseName = (p) => (/^\d+\.\d+V$/.test(p) ? p : p.split('.')[0]);   // GND.2 -> GND, but 3.3V stays 3.3V (not pin 3)
 const isBB = (type) => !!BY_TAG[type]?.breadboard;
 const ROT = [[1, 0, 0, 1], [0, -1, 1, 0], [-1, 0, 0, -1], [0, 1, -1, 0]]; // cos,-sin,sin,cos for 0/90/180/270
 
@@ -145,6 +145,7 @@ export class CircuitCanvas {
       if (k in el) { try { el[k] = k === 'pixels' ? +v : v; } catch { /* readonly */ } }
     }
     if (type === 'wokwi-resistor') el.value = String(attrs.value);
+    if (type === 'mod-capacitor' && attrs.capacitance) el.setText?.('label', attrs.capacitance + 'µF');
   }
 
   // local (unrotated) -> part-relative rotated coordinates
@@ -477,7 +478,7 @@ export class CircuitCanvas {
     const pa = this.pinPos(this.pending.ref); if (!pa) return; const w = this._pointerWorld;
     this.ghost.setAttribute('d', this._curve(pa, { x: w.x, y: w.y, part: null })); this.ghost.style.display = '';
   }
-  pinLabel(part, info) { return info.label && info.label !== info.name.split('.')[0] ? info.label : (isBB(part.type) ? info.description : info.name); }
+  pinLabel(part, info) { return info.label && info.label !== (/^\d+\.\d+V$/.test(info.name) ? info.name : info.name.split('.')[0]) ? info.label : (isBB(part.type) ? info.description : info.name); }
   _showTip(pinEl) {
     const part = this.parts.get(pinEl.dataset.pid); const info = part?.pinInfo.find((p) => p.name === pinEl.dataset.pin); if (!info) return;
     const sig = (info.signals || []).map((s) => (s.type === 'power' ? s.signal : s.type === 'analog' ? 'ADC' + (s.channel ?? '') : s.type === 'pwm' ? 'PWM' : `${s.type.toUpperCase()} ${s.signal}`)).join(' · ');

@@ -4,7 +4,7 @@
 const P = 9.6; // 0.1 inch header pitch at 96 dpi (same as Wokwi elements)
 
 // pin entry: "NAME" or "NAME|Label shown on silkscreen"
-const parsePin = (s) => { const [name, label] = s.split('|'); return { name, label: label ?? name.split('.')[0] }; };
+const parsePin = (s) => { const [name, label] = s.split('|'); return { name, label: label ?? (/^\d+\.\d+V$/.test(name) ? name : name.split('.')[0]) }; };
 
 function layout(spec) {
   const { w, h } = spec; const pins = []; const sides = spec.pins || {};
@@ -41,6 +41,24 @@ function decoSvg(d) {
       let s = ''; for (let yy = d.y; yy < d.y + d.h; yy += d.step) for (let xx = d.x; xx < d.x + d.w; xx += d.step) s += `<rect x="${xx}" y="${yy}" width="${d.step * 0.6}" height="${d.step * 0.6}" fill="${d.fill}"/>`;
       return s;
     }
+    case 'seg7': { // n digits of 7 segments (+ decimal point); segment bit0..6 = a..g, bit7 = dp (colon on digit 2)
+      const dw = d.w / d.n; let o = '';
+      for (let i = 0; i < d.n; i++) {
+        const x0 = d.x + i * dw + dw * 0.12, w = dw * 0.62, h = d.h, t = Math.max(2, w * 0.17), y0 = d.y;
+        const hs = (yy) => `<rect data-seg="${i}.%K" x="${x0 + t * 0.7}" y="${yy}" width="${w - t * 1.4}" height="${t}" rx="${t / 2}"/>`;
+        const vs = (xx, yy) => `<rect data-seg="${i}.%K" x="${xx}" y="${yy}" width="${t}" height="${h / 2 - t * 1.1}" rx="${t / 2}"/>`;
+        const seg = [hs(y0), vs(x0 + w - t, y0 + t * 0.6), vs(x0 + w - t, y0 + h / 2 + t * 0.1), hs(y0 + h - t), vs(x0, y0 + h / 2 + t * 0.1), vs(x0, y0 + t * 0.6), hs(y0 + h / 2 - t / 2)];
+        seg.forEach((sg, k) => { o += sg.replace('%K', k); });
+        o += `<circle data-seg="${i}.7" cx="${x0 + w + t * 1.1}" cy="${y0 + h - t / 2}" r="${t * 0.55}"/>`;
+      }
+      return `<g data-seg7 fill="#3a1010">${o}</g>`;
+    }
+    case 'matrix': { // n cascaded 8x8 LED matrices, left to right; pixel data-px = "device.row.col"
+      let o = '';
+      for (let m = 0; m < d.n; m++) for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++)
+        o += `<circle data-px="${m}.${r}.${c}" cx="${(d.x + m * 8 * d.pitch + c * d.pitch + d.pitch / 2).toFixed(1)}" cy="${(d.y + r * d.pitch + d.pitch / 2).toFixed(1)}" r="${d.r}"/>`;
+      return `<g data-matrix fill="#3a1010">${o}</g>`;
+    }
     default: return '';
   }
 }
@@ -63,7 +81,7 @@ export function defineModule(spec) {
           + (spec.nolabels ? '' : `<text x="${lx}" y="${ly}" font-size="${spec.pinFont ?? 5.6}" fill="${spec.labelColor ?? '#fff'}" text-anchor="${anchor}" font-family="Arial,Helvetica,sans-serif"${rot}>${esc(p.label)}</text>`);
       }).join('');
       const body = spec.body === false ? '' : `<rect x=".5" y=".5" width="${w - 1}" height="${h - 1}" rx="${spec.rx ?? 4}" fill="${spec.color ?? '#1b4f9c'}" stroke="#0005"/>`;
-      const label = spec.label === false ? '' : `<text x="${spec.lx ?? w / 2}" y="${spec.ly ?? h / 2 + 3}" font-size="${spec.lsize ?? 8}" fill="${spec.lcolor ?? '#fff'}" text-anchor="middle" font-weight="700" font-family="Arial,Helvetica,sans-serif">${esc(spec.label ?? spec.name)}</text>`;
+      const label = spec.label === false ? '' : `<text x="${spec.lx ?? w / 2}" y="${spec.ly ?? h / 2 + 3}" font-size="${spec.lsize ?? 8}" fill="${spec.lcolor ?? '#fff'}" text-anchor="middle" font-weight="700" font-family="Arial,Helvetica,sans-serif" data-text="label">${esc(spec.label ?? spec.name)}</text>`;
       const screen = spec.screen ? `<canvas width="${spec.screen.cols}" height="${spec.screen.rows}" style="position:absolute;left:${spec.screen.x}px;top:${spec.screen.y}px;width:${spec.screen.w}px;height:${spec.screen.h}px;image-rendering:pixelated;background:#000"></canvas>` : '';
       this.shadowRoot.innerHTML = `<style>:host{display:inline-block;position:relative;width:${w}px;height:${h}px;line-height:0}svg{display:block;overflow:visible}[data-rotor]{transition:none}</style>`
         + `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">${body}${(spec.deco || []).map(decoSvg).join('')}${label}${pinsSvg}</svg>${screen}`;
@@ -90,6 +108,23 @@ export function defineModule(spec) {
       const img = ctx.createImageData(cols, rows);
       for (let i = 0; i < cols * rows; i++) { const o = i * 4; const on = bits[i]; img.data[o] = on ? color[0] : 0; img.data[o + 1] = on ? color[1] : 0; img.data[o + 2] = on ? color[2] : 0; img.data[o + 3] = 255; }
       ctx.putImageData(img, 0, 0);
+    }
+    // paint a seg7 deco: bytes = segment masks per digit, bright 0..1, on = display enabled
+    setSeg7(bytes, bright = 1, on = true) {
+      const g = this.shadowRoot.querySelector('[data-seg7]'); if (!g) return;
+      const col = on ? `rgba(255,${40 + Math.round(30 * (1 - bright))},30,${0.35 + 0.65 * bright})` : '#3a1010';
+      g.querySelectorAll('[data-seg]').forEach((r) => {
+        const [i, k] = r.dataset.seg.split('.').map(Number);
+        const lit = on && ((bytes[i] ?? 0) >> k) & 1;
+        r.setAttribute('fill', lit ? col : '#3a1010');
+      });
+    }
+    // paint a matrix deco: rows[m][r] = 8-bit row of device m (left to right), bit 7 = leftmost LED
+    setMatrix(rows, bright = 1) {
+      const g = this.shadowRoot.querySelector('[data-matrix]'); if (!g) return;
+      const col = `rgba(255,45,35,${0.35 + 0.65 * bright})`;
+      (this._px ||= [...g.querySelectorAll('[data-px]')].map((e) => [e, ...e.dataset.px.split('.').map(Number)]))
+        .forEach(([e, m, r, c]) => { const f = ((rows[m]?.[r] ?? 0) >> (7 - c)) & 1 ? col : '#3a1010'; if (e._f !== f) { e._f = f; e.setAttribute('fill', f); } });
     }
     setText(sel, text) { const t = this.shadowRoot.querySelector(`[data-text="${sel}"]`); if (t) t.textContent = text; }
   }
@@ -128,11 +163,16 @@ export const MODULE_SPECS = [
   { tag: 'mod-dht11', name: 'DHT11 (modul 3 pin)', cat: 'Sensor', sim: 'full', w: 52, h: 84, color: blue, pins: { b: ['VCC|+', 'DATA|OUT', 'GND|-'] },
     deco: [{ t: 'rect', x: 8, y: 6, w: 36, h: 46, fill: '#3d8fd6', rx: 3 }, mesh(12, 10, 30, 38)], label: 'DHT11', ly: 62, lsize: 7, outs: ['DATA'], keywords: 'suhu kelembapan temperature humidity', logic: 'vcc',
     props: [{ key: 'temperature', label: 'Suhu', type: 'range', min: 0, max: 50, step: 1, def: 28, unit: ' °C' }, { key: 'humidity', label: 'Kelembapan', type: 'range', min: 20, max: 90, step: 1, def: 65, unit: ' %' }] },
-  { tag: 'mod-ds18b20', name: 'DS18B20 (probe tahan air)', cat: 'Sensor', sim: 'visual', w: 44, h: 96, color: black, pins: { b: ['GND|GND', 'DQ|DATA', 'VDD|VDD'] },
-    deco: [{ t: 'rect', x: 14, y: 4, w: 16, h: 50, fill: '#c0c4c9', rx: 7 }], label: 'DS18B20', ly: 68, lsize: 6, outs: ['DQ'], keywords: 'suhu temperature onewire 1-wire probe' },
-  { tag: 'mod-bmp280', name: 'BMP280 (tekanan udara, I2C)', cat: 'Sensor', sim: 'visual', w: 70, h: 54, color: purple, pins: { t: ['VCC', 'GND', 'SCL', 'SDA', 'CSB', 'SDO'] },
-    deco: [...chip(28, 26, 14, 12)], label: 'BMP280', ly: 48, lsize: 6, keywords: 'tekanan pressure altitude barometer i2c' },
-  { tag: 'mod-bme280', name: 'BME280 (suhu, RH, tekanan)', cat: 'Sensor', sim: 'visual', w: 56, h: 54, color: purple, pins: { t: ['VIN', 'GND', 'SCL', 'SDA'] }, deco: [...chip(21, 26, 14, 12)], label: 'BME280', ly: 48, lsize: 6, keywords: 'humidity pressure i2c' },
+  { tag: 'mod-ds18b20', name: 'DS18B20 (probe tahan air)', cat: 'Sensor', sim: 'full', w: 44, h: 96, color: black, pins: { b: ['GND|GND', 'DQ|DATA', 'VDD|VDD'] },
+    deco: [{ t: 'rect', x: 14, y: 4, w: 16, h: 50, fill: '#c0c4c9', rx: 7 }], label: 'DS18B20', ly: 68, lsize: 6, outs: ['DQ'], keywords: 'suhu temperature onewire 1-wire probe',
+    props: [{ key: 'temperature', label: 'Suhu', type: 'range', min: -55, max: 125, step: 0.5, def: 25, unit: ' °C' }] },
+  { tag: 'mod-bmp280', name: 'BMP280 (tekanan udara, I2C)', cat: 'Sensor', sim: 'full', w: 70, h: 54, color: purple, pins: { t: ['VCC', 'GND', 'SCL', 'SDA', 'CSB', 'SDO'] },
+    deco: [...chip(28, 26, 14, 12)], label: 'BMP280', ly: 48, lsize: 6, keywords: 'tekanan pressure altitude barometer i2c',
+    props: [{ key: 'temperature', label: 'Suhu', type: 'range', min: -40, max: 85, step: 0.5, def: 24, unit: ' °C' }, { key: 'pressure', label: 'Tekanan', type: 'range', min: 300, max: 1100, step: 1, def: 1013, unit: ' hPa' },
+      { key: 'address', label: 'Alamat I2C', type: 'select', options: ['0x76', '0x77'], def: '0x76' }] },
+  { tag: 'mod-bme280', name: 'BME280 (suhu, RH, tekanan)', cat: 'Sensor', sim: 'full', w: 56, h: 54, color: purple, pins: { t: ['VIN', 'GND', 'SCL', 'SDA'] }, deco: [...chip(21, 26, 14, 12)], label: 'BME280', ly: 48, lsize: 6, keywords: 'humidity pressure i2c',
+    props: [{ key: 'temperature', label: 'Suhu', type: 'range', min: -40, max: 85, step: 0.5, def: 24, unit: ' °C' }, { key: 'humidity', label: 'Kelembapan', type: 'range', min: 0, max: 100, step: 1, def: 50, unit: ' %' },
+      { key: 'pressure', label: 'Tekanan', type: 'range', min: 300, max: 1100, step: 1, def: 1013, unit: ' hPa' }, { key: 'address', label: 'Alamat I2C', type: 'select', options: ['0x76', '0x77'], def: '0x76' }] },
   { tag: 'mod-soil', name: 'Sensor Kelembapan Tanah (resistif)', cat: 'Sensor', sim: 'full', w: 64, h: 150, color: blue, pins: { t: ['VCC', 'GND', 'DO', 'AO'] },
     deco: [pwr(14, 30), sig(50, 30), { t: 'rect', x: 22, y: 22, w: 20, h: 14, fill: '#2a6fd0', rx: 2 }, { t: 'path', d: 'M12 52 h16 v86 l-8 10 l-8 -10z M36 52 h16 v86 l-8 10 l-8 -10z', fill: '#c6a144' }],
     label: 'SOIL', ly: 47, lsize: 7, outs: ['AO', 'DO'], logic: 'vcc', keywords: 'soil moisture tanah kelembapan tanaman irigasi',
@@ -187,20 +227,29 @@ export const MODULE_SPECS = [
     props: [{ key: 'distance', label: 'Jarak', type: 'range', min: 20, max: 450, step: 1, def: 100, unit: ' cm' }] },
   { tag: 'mod-ds3231', name: 'RTC DS3231 (I2C)', cat: 'Sensor', sim: 'full', w: 100, h: 60, color: blue, pins: { l: ['32K', 'SQW', 'SCL', 'SDA', 'VCC', 'GND'] },
     deco: [{ t: 'circle', x: 70, y: 30, r: 18, fill: '#c0c4c9', stroke: '#888' }], label: 'DS3231', lx: 70, ly: 33, lsize: 6, lcolor: '#333', keywords: 'rtc clock jam waktu real time i2c' },
-  { tag: 'mod-gps', name: 'GPS NEO-6M', cat: 'Sensor', sim: 'visual', w: 96, h: 86, color: blue, pins: { b: ['VCC', 'RX', 'TX', 'GND'] }, deco: [{ t: 'rect', x: 26, y: 8, w: 44, h: 44, fill: '#c9a227', rx: 2 }],
-    label: 'NEO-6M', ly: 64, lsize: 7, keywords: 'gps lokasi location navigasi uart' },
-  { tag: 'mod-rc522', name: 'RFID RC522', cat: 'Sensor', sim: 'visual', w: 104, h: 120, color: blue, pins: { b: ['SDA', 'SCK', 'MOSI', 'MISO', 'IRQ', 'GND', 'RST', '3.3V'] },
-    deco: [{ t: 'rect', x: 10, y: 8, w: 84, h: 70, fill: 'none', stroke: '#d9c27a', sw: 3, rx: 6 }, ...chip(42, 82, 20, 12)], label: 'RC522', ly: 48, lsize: 8, keywords: 'rfid kartu card nfc absensi spi' },
-  { tag: 'mod-max30102', name: 'MAX30102 (SpO2 & detak)', cat: 'Sensor', sim: 'visual', w: 58, h: 54, color: purple, pins: { t: ['VIN', 'SCL', 'SDA', 'INT'] }, deco: [...chip(22, 24, 14, 10)], label: 'MAX30102', ly: 46, lsize: 5.5, keywords: 'spo2 oximeter heart i2c' },
+  { tag: 'mod-gps', name: 'GPS NEO-6M', cat: 'Sensor', sim: 'full', w: 96, h: 86, color: blue, pins: { b: ['VCC', 'RX', 'TX', 'GND'] }, deco: [{ t: 'rect', x: 26, y: 8, w: 44, h: 44, fill: '#c9a227', rx: 2 }],
+    label: 'NEO-6M', ly: 64, lsize: 7, keywords: 'gps lokasi location navigasi uart tinygps nmea',
+    props: [{ key: 'fix', label: 'Sinyal satelit (fix)', type: 'select', options: ['ya', 'tidak'], def: 'ya' }, { key: 'lat', label: 'Lintang', type: 'range', min: -90, max: 90, step: 0.0001, def: -6.2, unit: '°' },
+      { key: 'lng', label: 'Bujur', type: 'range', min: -180, max: 180, step: 0.0001, def: 106.8167, unit: '°' }, { key: 'alt', label: 'Ketinggian', type: 'range', min: -50, max: 3000, step: 1, def: 8, unit: ' m' },
+      { key: 'speed', label: 'Kecepatan', type: 'range', min: 0, max: 200, step: 0.5, def: 0, unit: ' km/j' }, { key: 'sats', label: 'Jumlah satelit', type: 'range', min: 3, max: 12, step: 1, def: 8, unit: '' },
+      { key: 'baud', label: 'Baud rate', type: 'select', options: ['9600', '4800', '38400', '115200'], def: '9600' }] },
+  { tag: 'mod-rc522', name: 'RFID RC522', cat: 'Sensor', sim: 'full', w: 104, h: 120, color: blue, pins: { b: ['SDA', 'SCK', 'MOSI', 'MISO', 'IRQ', 'GND', 'RST', '3.3V'] },
+    deco: [{ t: 'rect', x: 10, y: 8, w: 84, h: 70, fill: 'none', stroke: '#d9c27a', sw: 3, rx: 6 }, ...chip(42, 82, 20, 12)], label: 'RC522', ly: 48, lsize: 8, keywords: 'rfid kartu card nfc absensi spi mfrc522',
+    props: [{ key: 'card', label: 'Kartu di dekat pembaca', type: 'select', options: ['tidak ada', 'Kartu 1', 'Kartu 2', 'Gantungan kunci'], def: 'tidak ada' }] },
+  { tag: 'mod-max30102', name: 'MAX30102 (SpO2 & detak)', cat: 'Sensor', sim: 'full', w: 86, h: 54, color: purple, pins: { t: ['VIN', 'SCL', 'SDA', 'INT', 'IRD', 'RD', 'GND'] }, deco: [...chip(36, 24, 14, 10)], label: 'MAX30102', ly: 46, lsize: 5.5, keywords: 'spo2 oximeter heart i2c detak jantung oksigen',
+    props: [{ key: 'finger', label: 'Jari di sensor', type: 'select', options: ['ya', 'tidak'], def: 'ya' }, { key: 'bpm', label: 'Detak jantung', type: 'range', min: 40, max: 180, step: 1, def: 75, unit: ' BPM' },
+      { key: 'spo2', label: 'SpO2', type: 'range', min: 80, max: 99, step: 1, def: 97, unit: ' %' }] },
 
   // ===================== Displays
   { tag: 'mod-oled-i2c', name: 'OLED 0.96" SSD1306 (I2C)', cat: 'Tampilan', sim: 'full', w: 108, h: 98, color: '#1d3a73', pins: { t: ['GND', 'VCC', 'SCL', 'SDA'] },
     deco: [{ t: 'rect', x: 4, y: 18, w: 100, h: 58, fill: '#0b0b0b', rx: 2 }], screen: { x: 6, y: 21, w: 96, h: 48, cols: 128, rows: 64 }, label: 'SSD1306 128x64', ly: 88, lsize: 6,
     keywords: 'oled display layar i2c ssd1306 0.96' },
-  { tag: 'mod-tm1637', name: '7-Segment 4 Digit TM1637', cat: 'Tampilan', sim: 'visual', w: 130, h: 52, color: blue, pins: { r: ['CLK', 'DIO', 'VCC', 'GND'] },
-    deco: [{ t: 'rect', x: 6, y: 6, w: 92, h: 40, fill: '#111', rx: 2 }, { t: 'text', x: 52, y: 37, text: '88:88', size: 28, fill: '#ff3b30', bold: true }], label: false, keywords: 'tm1637 clock 7 segment jam' },
-  { tag: 'mod-max7219', name: 'Matriks LED 8x8 MAX7219', cat: 'Tampilan', sim: 'visual', w: 110, h: 96, color: '#1d5c2e', pins: { l: ['VCC', 'GND', 'DIN', 'CS', 'CLK'] },
-    deco: [{ t: 'rect', x: 22, y: 6, w: 84, h: 84, fill: '#111', rx: 2 }, ...[...Array(64).keys()].map((i) => ({ t: 'circle', x: 28 + (i % 8) * 10.3, y: 12 + Math.floor(i / 8) * 10.3, r: 3.6, fill: '#4a1414' }))], label: false, keywords: 'matrix led max7219 running text' },
+  { tag: 'mod-tm1637', name: '7-Segment 4 Digit TM1637', cat: 'Tampilan', sim: 'full', w: 130, h: 52, color: blue, pins: { r: ['CLK', 'DIO', 'VCC', 'GND'] },
+    deco: [{ t: 'rect', x: 6, y: 6, w: 92, h: 40, fill: '#111', rx: 2 }, { t: 'seg7', x: 10, y: 10, w: 86, h: 32, n: 4 }], label: false, keywords: 'tm1637 clock 7 segment jam' },
+  { tag: 'mod-max7219', name: 'Matriks LED 8x8 MAX7219', cat: 'Tampilan', sim: 'full', w: 110, h: 96, color: '#1d5c2e', pins: { l: ['VCC', 'GND', 'DIN', 'CS', 'CLK'], r: ['VCC.2|VCC', 'GND.2|GND', 'DOUT', 'CS.2|CS', 'CLK.2|CLK'] },
+    deco: [{ t: 'rect', x: 22, y: 6, w: 66, h: 84, fill: '#111', rx: 2 }, { t: 'matrix', x: 27, y: 14, n: 1, pitch: 8.2, r: 3.2 }], label: false, keywords: 'matrix led max7219 running text ledcontrol dot' },
+  { tag: 'mod-max7219-4', name: 'Matriks LED 32x8 MAX7219 (4-in-1 FC-16)', cat: 'Tampilan', sim: 'full', w: 300, h: 92, color: '#1d5c2e', pins: { r: ['VCC', 'GND', 'DIN', 'CS', 'CLK'], l: ['VCC.2|VCC', 'GND.2|GND', 'DOUT', 'CS.2|CS', 'CLK.2|CLK'] },
+    deco: [{ t: 'rect', x: 20, y: 6, w: 260, h: 80, fill: '#111', rx: 2 }, { t: 'matrix', x: 25, y: 13, n: 4, pitch: 8.1, r: 3.2 }], label: false, keywords: 'matrix led max7219 running text parola fc16 dot 32x8' },
 
   // ===================== Actuators / outputs
   { tag: 'mod-relay1', name: 'Modul Relay 1 Kanal', cat: 'Aktuator', sim: 'full', w: 116, h: 60, color: blue, pins: { l: ['VCC', 'GND', 'IN'], r: ['NO', 'COM', 'NC'] },
@@ -234,16 +283,20 @@ export const MODULE_SPECS = [
     deco: [{ t: 'led', key: 'R', x: 20, y: 16, r: 8, color: '#ff3b30' }, { t: 'led', key: 'Y', x: 20, y: 38, r: 8, color: '#ffcc00' }, { t: 'led', key: 'G', x: 20, y: 60, r: 8, color: '#33d17a' }], label: false, keywords: 'traffic light lampu lalu lintas' },
 
   // ===================== Communication
-  { tag: 'mod-hc05', name: 'Bluetooth HC-05', cat: 'Komunikasi', sim: 'visual', w: 72, h: 120, color: blue, pins: { b: ['STATE', 'RXD', 'TXD', 'GND', 'VCC', 'EN'] },
+  { tag: 'mod-hc05', name: 'Bluetooth HC-05', cat: 'Komunikasi', sim: 'full', w: 72, h: 120, color: blue, pins: { b: ['STATE', 'RXD', 'TXD', 'GND', 'VCC', 'EN'] },
     deco: [{ t: 'rect', x: 10, y: 6, w: 52, h: 66, fill: '#2a7d3f', rx: 2 }], label: 'HC-05', ly: 90, lsize: 8, vlabels: true, keywords: 'bluetooth hc05 hc06 serial android' },
-  { tag: 'mod-nrf24', name: 'NRF24L01 (2.4 GHz)', cat: 'Komunikasi', sim: 'visual', w: 96, h: 50, color: green, pins: { l: ['GND', 'CE', 'SCK', 'MISO'], r: ['VCC', 'CSN', 'MOSI', 'IRQ'] },
-    deco: [{ t: 'path', d: 'M60 6 h30 v6 h-26 v6 h26 v6 h-26 v6 h26', fill: 'none', stroke: '#d9c27a', sw: 2 }], label: 'nRF24L01', lx: 46, lsize: 6, keywords: 'radio wireless nrf24 rf' },
-  { tag: 'mod-lora', name: 'LoRa SX1278 (Ra-02)', cat: 'Komunikasi', sim: 'visual', w: 90, h: 76, color: '#d0d4da', labelColor: '#222', lcolor: '#222', pins: { l: ['GND', '3.3V', 'RST', 'DIO0'], r: ['NSS', 'MOSI', 'MISO', 'SCK'] },
-    label: 'LoRa Ra-02', lsize: 7, keywords: 'lora lorawan long range sx1278 iot' },
-  { tag: 'mod-sim800l', name: 'GSM SIM800L', cat: 'Komunikasi', sim: 'visual', w: 96, h: 80, color: red, pins: { l: ['NET', 'VCC', 'RST', 'RXD', 'TXD', 'GND'] },
-    deco: [{ t: 'rect', x: 40, y: 14, w: 46, h: 40, fill: '#aaa', rx: 3 }], label: 'SIM800L', lx: 62, ly: 70, lsize: 6, keywords: 'gsm sms telepon sim800 gprs' },
-  { tag: 'mod-esp01', name: 'ESP-01 (ESP8266)', cat: 'Komunikasi', sim: 'visual', w: 90, h: 60, color: '#1d1d1d', pins: { l: ['GND', 'IO2', 'IO0', 'RX'], r: ['TX', 'EN', 'RST', '3V3'] },
-    deco: [{ t: 'path', d: 'M30 6 h40 v6 h-36 v6 h36', fill: 'none', stroke: '#d9c27a', sw: 2 }, ...chip(36, 26, 18, 18)], label: false, keywords: 'esp01 wifi at command' },
+  { tag: 'mod-nrf24', name: 'NRF24L01 (2.4 GHz)', cat: 'Komunikasi', sim: 'full', w: 96, h: 50, color: green, pins: { l: ['GND', 'CE', 'SCK', 'MISO'], r: ['VCC', 'CSN', 'MOSI', 'IRQ'] },
+    deco: [{ t: 'path', d: 'M60 6 h30 v6 h-26 v6 h26 v6 h-26 v6 h26', fill: 'none', stroke: '#d9c27a', sw: 2 }], label: 'nRF24L01', lx: 46, lsize: 6, keywords: 'radio wireless nrf24 rf rf24',
+    props: [{ key: 'peer', label: 'Lawan bicara', type: 'select', options: ['penerima virtual', 'gema (kirim balik)', 'tidak ada'], def: 'penerima virtual' }] },
+  { tag: 'mod-lora', name: 'LoRa SX1278 (Ra-02)', cat: 'Komunikasi', sim: 'full', w: 90, h: 76, color: '#d0d4da', labelColor: '#222', lcolor: '#222', pins: { l: ['GND', '3.3V', 'RST', 'DIO0'], r: ['NSS', 'MOSI', 'MISO', 'SCK'] },
+    label: 'LoRa Ra-02', lsize: 7, keywords: 'lora lorawan long range sx1278 iot',
+    props: [{ key: 'peer', label: 'Node lain', type: 'select', options: ['tidak ada', 'gema (kirim balik)'], def: 'tidak ada' }] },
+  { tag: 'mod-sim800l', name: 'GSM SIM800L', cat: 'Komunikasi', sim: 'full', w: 96, h: 80, color: red, pins: { l: ['NET', 'VCC', 'RST', 'RXD', 'TXD', 'GND'] },
+    deco: [{ t: 'rect', x: 40, y: 14, w: 46, h: 40, fill: '#aaa', rx: 3 }], label: 'SIM800L', lx: 62, ly: 70, lsize: 6, keywords: 'gsm sms telepon sim800 gprs',
+    props: [{ key: 'signal', label: 'Kuat sinyal (CSQ)', type: 'range', min: 0, max: 31, step: 1, def: 20, unit: '' }, { key: 'operator', label: 'Operator', type: 'select', options: ['TELKOMSEL', 'INDOSAT', 'XL', 'TRI'], def: 'TELKOMSEL' }] },
+  { tag: 'mod-esp01', name: 'ESP-01 (ESP8266)', cat: 'Komunikasi', sim: 'full', w: 90, h: 60, color: '#1d1d1d', pins: { l: ['GND', 'IO2', 'IO0', 'RX'], r: ['TX', 'EN', 'RST', '3V3'] },
+    deco: [{ t: 'path', d: 'M30 6 h40 v6 h-36 v6 h36', fill: 'none', stroke: '#d9c27a', sw: 2 }, ...chip(36, 26, 18, 18)], label: false, keywords: 'esp01 wifi at command esp8266',
+    props: [{ key: 'baud', label: 'Baud rate firmware AT', type: 'select', options: ['115200', '9600', '57600', '38400'], def: '115200' }] },
 
   // ===================== Power
   { tag: 'mod-battery9v', name: 'Baterai 9V', cat: 'Daya', sim: 'full', w: 64, h: 110, color: '#2b2b2b', rx: 6, pins: { t: ['+', '-'] },
@@ -259,8 +312,11 @@ export const MODULE_SPECS = [
     props: [{ key: 'light', label: 'Cahaya matahari', type: 'range', min: 0, max: 100, step: 1, def: 80, unit: ' %' }] },
 
   // ===================== Passive
-  { tag: 'mod-capacitor', name: 'Kapasitor Elektrolit', cat: 'Pasif & Dasar', sim: 'visual', w: 34, h: 56, color: '#1b4f9c', rx: 8, pins: { b: ['+', '-'] }, label: '100µF', ly: 24, lsize: 5.5, keywords: 'capacitor kapasitor elco' },
-  { tag: 'mod-diode', name: 'Dioda 1N4007', cat: 'Pasif & Dasar', sim: 'visual', w: 70, h: 20, color: '#1b1b1b', rx: 3, pins: { l: ['A'], r: ['K'] }, deco: [{ t: 'rect', x: 50, y: 0, w: 5, h: 20, fill: '#ccc', rx: 0 }], label: false, keywords: 'diode dioda penyearah' },
+  { tag: 'mod-capacitor', name: 'Kapasitor Elektrolit', cat: 'Pasif & Dasar', sim: 'full', w: 34, h: 56, color: '#1b4f9c', rx: 8, pins: { b: ['+', '-'] }, label: '100µF', ly: 24, lsize: 5.5, keywords: 'capacitor kapasitor elco rc filter',
+    props: [{ key: 'capacitance', label: 'Kapasitansi (µF)', type: 'select', options: ['1', '10', '22', '47', '100', '220', '470', '1000', '2200', '4700'], def: '100' },
+      { key: 'rating', label: 'Rating tegangan (V)', type: 'select', options: ['6.3', '10', '16', '25', '35', '50'], def: '16' }] },
+  { tag: 'mod-diode', name: 'Dioda 1N4007', cat: 'Pasif & Dasar', sim: 'full', w: 70, h: 20, color: '#1b1b1b', rx: 3, pins: { l: ['A'], r: ['K'] }, deco: [{ t: 'rect', x: 50, y: 0, w: 5, h: 20, fill: '#ccc', rx: 0 }], label: false, keywords: 'diode dioda penyearah flyback schottky',
+    props: [{ key: 'vf', label: 'Tegangan maju Vf (V)', type: 'select', options: ['0.3', '0.6', '0.7', '1.0'], def: '0.7' }] },
 ];
 
 export function registerModules() { for (const s of MODULE_SPECS) defineModule(s); }

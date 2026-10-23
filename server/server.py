@@ -86,7 +86,7 @@ async def build(req):
         libs = [str(x) for x in (data.get("libs") or []) if isinstance(x, str)][:8]
         fut = loop.run_in_executor(COMPILE_POOL, lambda: compile_sketch_wasm(str(data.get("sketch", "")), str(data.get("board", "esp32")), libs))
     else:
-        fut = loop.run_in_executor(COMPILE_POOL, lambda: compile_sketch(str(data.get("sketch", ""))))
+        fut = loop.run_in_executor(COMPILE_POOL, lambda: compile_sketch(str(data.get("sketch", "")), str(data.get("mcu", "uno"))))
     try:
         # big libraries (Edge Impulse, TFLite) take minutes the first time: answer with a job id and let the
         # browser poll /job/<id> instead of hitting proxy timeouts
@@ -293,7 +293,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "7860"))
     core_objs()  # warm the core cache so the first user compile is fast
     if runtime_objs:
-        for b in ("esp32", "esp8266", "rp2040"):
+        for b in ("esp32", "esp8266", "rp2040", "nanorp2040"):
             try: runtime_objs(b)
             except Exception as e: print("wasm runtime warmup failed for", b, e, flush=True)
     print("arduino-compile + gateway listening on :%d" % port, flush=True)

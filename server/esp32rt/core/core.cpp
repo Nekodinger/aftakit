@@ -27,7 +27,11 @@ extern "C" void attachInterruptArg(uint8_t pin, void (*fn)(void *), void *arg, i
 extern "C" void detachInterrupt(uint8_t pin) { if (pin < 64) { g_irq[pin] = { nullptr, nullptr, nullptr }; h_irq_attach(pin, 0); } }
 
 // ---------------------------------------------------------------- GPIO / ADC
-static uint8_t g_adc_bits = 12, g_pwm_bits = 8;
+#if defined(ARDUINO_ARCH_RP2040)
+static uint8_t g_adc_bits = 10, g_pwm_bits = 8;   // Arduino RP2040 cores: analogRead() is 10-bit unless analogReadResolution() is called
+#else
+static uint8_t g_adc_bits = 12, g_pwm_bits = 8;   // ESP32: 12-bit
+#endif
 static uint32_t g_pwm_freq = 1000;
 extern "C" void pinMode(uint8_t pin, uint8_t mode) { h_pin_mode(pin, mode); }
 extern "C" void digitalWrite(uint8_t pin, uint8_t val) { h_digital_write(pin, val ? 1 : 0); tick(); }
@@ -39,7 +43,7 @@ extern "C" int analogRead(uint8_t pin) {
 #if defined(SIM_BOARD_ESP8266)
   double full = 3300.0;           // NodeMCU / D1 mini: on-board divider -> 0..3.3 V maps to 0..1023
   int maxv = 1023;
-#elif defined(SIM_BOARD_RP2040)
+#elif defined(ARDUINO_ARCH_RP2040)
   double full = 3300.0; int maxv = (1 << g_adc_bits) - 1;
 #else
   double full = 3300.0;           // ESP32, 11 dB attenuation (default): ~0..3.3 V (ideal, linear)
@@ -134,7 +138,8 @@ extern "C" char *itoa(int v, char *s, int radix) { return ltoa(v, s, radix); }
 extern "C" char *dtostrf(double val, signed char width, unsigned char prec, char *sout) { char fmt[20]; snprintf(fmt, sizeof fmt, "%%%d.%df", width, prec); sprintf(sout, fmt, val); return sout; }
 
 // ---------------------------------------------------------------- Serial
-void HardwareSerial::begin(unsigned long baud, uint32_t, int8_t, int8_t, bool, unsigned long) { _baud = baud; h_serial_begin(_port, (int)baud); }
+void HardwareSerial::begin(unsigned long baud, uint32_t, int8_t rx, int8_t tx, bool, unsigned long) { _baud = baud; if (rx >= 0 || tx >= 0) h_serial_pins(_port, rx, tx); h_serial_begin(_port, (int)baud); }
+void HardwareSerial::setPins(int8_t rx, int8_t tx, int8_t, int8_t) { h_serial_pins(_port, rx, tx); }
 int HardwareSerial::available() { tick(); return (_peeked >= 0 ? 1 : 0) + h_serial_available(_port); }
 int HardwareSerial::peek() { if (_peeked < 0) _peeked = h_serial_read(_port); return _peeked; }
 int HardwareSerial::read() { tick(); if (_peeked >= 0) { int c = _peeked; _peeked = -1; return c; } return h_serial_read(_port); }

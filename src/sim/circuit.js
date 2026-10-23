@@ -4,6 +4,9 @@
 //   switches       : closed contacts merge two nets
 //   weak links     : resistors (a node with no strong driver takes the value across a resistor)
 //   pull-ups       : INPUT_PULLUP / module pull-ups, weaker than everything else
+// header pins that carry the same signal on a board (the Mega repeats SDA/SCL next to AREF)
+const BOARD_LINKS = { 'wokwi-arduino-mega': [['SDA', '20'], ['SCL', '21']] };
+
 export class Circuit {
   /** @param parts [{id,type,pins:[names]}]  @param connections [["id:pin","id:pin"],...] */
   constructor(parts, connections) {
@@ -20,9 +23,10 @@ export class Circuit {
       const byBase = new Map();
       for (const name of p.pins) {
         const i = idx(`${p.id}:${name}`);
-        const base = name.split('.')[0];
+        const base = (/^\d+\.\d+V$/.test(name) ? name : name.split('.')[0]);   // pins with one base (GND.1, GND.2, 1.l/1.r) are joined; '3.3V' is a name, not pin '3' + suffix
         if (byBase.has(base)) union(byBase.get(base), i); else byBase.set(base, i);
       }
+      for (const [a, b] of BOARD_LINKS[p.type] || []) if (p.pins.includes(a) && p.pins.includes(b)) union(idx(`${p.id}:${a}`), idx(`${p.id}:${b}`));
     }
     this.wired = new Set();
     for (const [a, b] of connections) {
@@ -61,6 +65,7 @@ export class Circuit {
     const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
     for (const [a, b] of switches) if (a >= 0 && b >= 0) { const ra = find(a), rb = find(b); if (ra !== rb) par[rb] = ra; }
     const val = new Array(n).fill(null);
+    const peak = new Array(n).fill(null);    // PWM nets: level of the pulses (val holds the average)
     const isStrong = new Array(n).fill(false);
     const by = new Map();
     for (const s of strong) {
@@ -80,6 +85,7 @@ export class Circuit {
         warnings.push({ kind: 'short', text: `Korsleting: ${[...new Set(list.map((s) => s.label))].join(' ↔ ')} terhubung langsung dengan tegangan berbeda` });
       } else v = vals.reduce((a, b) => a + b, 0) / vals.length;
       val[g] = v; isStrong[g] = true;
+      if (list.length === 1 && list[0].peak !== undefined) peak[g] = list[0].peak;
     }
     const propagate = () => {
       let changed = true, guard = 0;
@@ -89,8 +95,8 @@ export class Circuit {
           if (a < 0 || b < 0) continue;
           const ga = find(a), gb = find(b);
           if (ga === gb) continue;
-          if (val[ga] === null && val[gb] !== null) { val[ga] = val[gb]; changed = true; }
-          else if (val[gb] === null && val[ga] !== null) { val[gb] = val[ga]; changed = true; }
+          if (val[ga] === null && val[gb] !== null) { val[ga] = val[gb]; peak[ga] = peak[gb]; changed = true; }
+          else if (val[gb] === null && val[ga] !== null) { val[gb] = val[ga]; peak[gb] = peak[ga]; changed = true; }
         }
       }
     };
@@ -100,6 +106,7 @@ export class Circuit {
     return {
       v: (net) => (net < 0 ? null : val[find(net)]),
       strong: (net) => (net < 0 ? false : isStrong[find(net)]),
+      peak: (net) => (net < 0 ? null : peak[find(net)]),
       warnings,
     };
   }

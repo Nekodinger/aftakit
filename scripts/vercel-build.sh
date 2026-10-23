@@ -29,10 +29,16 @@ fi
 log "arduino sources"
 mkdir -p server/arduino-src && cd server/arduino-src
 for r in arduino/ArduinoCore-avr arduino-libraries/Servo arduino-libraries/LiquidCrystal adafruit/Adafruit_NeoPixel johnrickman/LiquidCrystal_I2C \
-         adafruit/Adafruit-GFX-Library adafruit/Adafruit_SSD1306 adafruit/Adafruit_BusIO adafruit/DHT-sensor-library adafruit/Adafruit_Sensor adafruit/RTClib; do
+         adafruit/Adafruit-GFX-Library adafruit/Adafruit_SSD1306 adafruit/Adafruit_BusIO adafruit/DHT-sensor-library adafruit/Adafruit_Sensor adafruit/RTClib \
+         PaulStoffregen/OneWire milesburton/Arduino-Temperature-Control-Library avishorp/TM1637 bogde/HX711 \
+         adafruit/Adafruit_BMP280_Library adafruit/Adafruit_BME280_Library sparkfun/SparkFun_MAX3010x_Sensor_Library \
+         wayoda/LedControl MajicDesigns/MD_MAX72XX MajicDesigns/MD_Parola adafruit/Adafruit_ILI9341 arduino-libraries/SD miguelbalboa/rfid SpenceKonde/ATTinyCore nRF24/RF24 sandeepmistry/arduino-LoRa mikalhart/TinyGPSPlus Arduino-IRremote/Arduino-IRremote; do
   [ -d "$(basename $r)" ] || git clone -q --depth 1 "https://github.com/$r.git"
 done
-rm -rf */.git
+rm -rf */.git ATTinyCore/avr/bootloaders ATTinyCore/avr/extras
+# examples / docs / host-side tools are never compiled: keep the packed sources small
+find . -mindepth 2 -type d \( -name examples -o -name docs -o -name extras -o -name images -o -name datasheets -o -name examples_linux \
+     -o -name examples_pico -o -name examples_uno_q -o -name pyRF24 -o -name test -o -name tests \) -prune -exec rm -rf {} + 2>/dev/null || true
 cd "$ROOT/server/esp32rt"
 if [ ! -f ArduinoJson/src/ArduinoJson.h ]; then
   rm -rf ArduinoJson && mkdir ArduinoJson && cd ArduinoJson && git init -q \

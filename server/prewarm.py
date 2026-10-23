@@ -37,7 +37,7 @@ void setup(){ Blynk.begin("x", "s", "p"); } void loop(){ Blynk.run(); }'''}
 
 if __name__ == "__main__":
     t = time.time(); core_objs()
-    for b in ("esp32", "esp8266", "rp2040"):
+    for b in ("esp32", "esp8266", "rp2040", "nanorp2040"):
         runtime_objs(b)
     bad = 0
     for board, group in (("esp32", ESP32), ("esp8266", ESP8266)):
@@ -46,5 +46,7 @@ if __name__ == "__main__":
             ok = bool(r["wasm"]); bad += not ok
             print(("ok  " if ok else "FAIL"), board, name, (r["stdout"] or "").replace("\n", " | ")[:200], "" if ok else r["stderr"][:600], flush=True)
     print("AVR", "ok" if compile_sketch("void setup(){} void loop(){}")["hex"] else "FAIL")
+    print("AVR Mega", "ok" if compile_sketch("void setup(){} void loop(){}", "mega")["hex"] else "FAIL")
+    print("ATtiny85", "ok" if compile_sketch("void setup(){} void loop(){}", "attiny85")["hex"] else "FAIL")
     print("prewarm done in %.0f s" % (time.time() - t))
     sys.exit(0)   # never fail the image build because a library index/download was unreachable

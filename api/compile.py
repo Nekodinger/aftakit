@@ -103,7 +103,7 @@ class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self._send(200, {"ok": True, "service": "arduino-compile (vercel)", "wasm": True, "gateway": True, "libs": bool(LIB_BASE),
-                         "boards": ["uno", "nano", "esp32", "esp8266", "rp2040"], "toolchain": "avr-gcc + wasi-sdk"})
+                         "boards": ["uno", "nano", "mega", "esp32", "esp8266", "rp2040", "nanorp2040"], "toolchain": "avr-gcc + wasi-sdk"})
 
     def do_POST(self):
         route = self._route()
@@ -120,7 +120,7 @@ class handler(BaseHTTPRequestHandler):
             if PACKED:  # unpack only the toolchain this request needs (avr-gcc for Uno/Nano, clang for the others)
                 _unpack("avr" if route == "build" else "wasi", TC)
             if route == "build":
-                return self._send(200, compiler.compile_sketch(str(data.get("sketch", ""))))
+                return self._send(200, compiler.compile_sketch(str(data.get("sketch", "")), str(data.get("mcu", "uno"))))
             libs = [str(x) for x in (data.get("libs") or []) if isinstance(x, str) and len(x) == 64][:8]
             for sha in libs:
                 try:

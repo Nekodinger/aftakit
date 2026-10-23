@@ -54,6 +54,7 @@ const canvas = new CircuitCanvas({
 const editor = new Editor({ ta: $('#code'), hl: $('#hl'), gutter: $('#gutter'), pos: $('#cursorPos'), onChange: () => setCompilerState(''), onRun: () => run() });
 editor.value = DEFAULT_CODE;
 canvas.on('toast', ({ text, err }) => toast(text, err));
+canvas.on('model', () => updateBoardInfo());
 canvas.on('change', ({ structural }) => {
   if (structural && sim.running) stopSim('Rangkaian diubah — simulasi dihentikan.');
   if (state.panel === 'props') renderProps();
@@ -266,6 +267,8 @@ if (isNarrow()) $('#workspace').classList.add('lp-closed');
 function setStatus(kind, text) { $('#simDot').className = 'dot ' + (kind || ''); $('#simText').textContent = text; }
 function setCompilerState(t) { $('#compilerState').textContent = t; }
 const runtimeOf = (b) => (b?.cat.runtime === 'wasm' ? b.cat.wasm : 'avr');
+const avrMcu = (b) => (b?.cat.board === 'mega' ? 'mega' : b?.cat.board === 'attiny85' ? 'attiny85' : 'uno');                       // AVR family: ATmega328P or ATmega2560
+const progKey = (b) => runtimeOf(b) + (runtimeOf(b) === 'avr' ? ':' + avrMcu(b) : '');
 function boardOf() { const p = [...canvas.parts.values()].find((x) => BY_TAG[x.type]?.board); return p ? { part: p, cat: BY_TAG[p.type], runnable: BY_TAG[p.type].sim === 'full' } : null; }
 function updateBoardInfo() {
   const b = boardOf(); queueMicrotask(updateBoardTabs);
@@ -283,8 +286,10 @@ sim.on('tick', ({ time }) => {
   if (state.boardEl) {
     const b = sim.board;
     try {
-      if (b.kind === 'avr') state.boardEl.led13 = !!b.pins['13']?.level;
+      if (b.kind === 'avr' && b.mcu?.name === 'ATtiny85') state.boardEl.led1 = !!b.pins.PB1?.level;   // Franzininho LED on PB1
+      else if (b.kind === 'avr') state.boardEl.led13 = !!b.pins['13']?.level;
       else if (state.boardEl.tagName === 'WOKWI-ESP32-DEVKIT-V1') state.boardEl.led1 = !!b.pins.D2?.level;  // blue LED on GPIO2
+      else if (state.boardEl.tagName === 'WOKWI-NANO-RP2040-CONNECT') state.boardEl.ledBuiltIn = !!b.pins.D13?.level;
       state.boardEl.ledPower = true;
     } catch { /* no led props */ }
   }
@@ -311,7 +316,7 @@ $('#tbCheck').onclick = () => showPanel('check', true);
 async function doCompile() {
   const b = boardOf();
   if (b && !b.runnable) {
-    const msg = `${b.cat.name} memakai inti ${b.cat.mcu}. Simulator ini menjalankan kode Uno/Nano (ATmega328P), ESP32, ESP32-CAM, NodeMCU/D1 mini (ESP8266) dan Pico. Untuk board ini unduh kode (.ino) lalu kompilasi & unggah dengan Arduino IDE.`;
+    const msg = `${b.cat.name} memakai inti ${b.cat.mcu}. Simulator ini menjalankan kode Uno/Nano (ATmega328P), Mega 2560, Franzininho (ATtiny85), ESP32, ESP32-CAM, NodeMCU/D1 mini (ESP8266), Pico dan Nano RP2040 Connect. Untuk board ini unduh kode (.ino) lalu kompilasi & unggah dengan Arduino IDE.`;
     $('#buildOut').textContent = msg; addLog('info', msg); setCompilerState('Tidak dikompilasi'); return false;
   }
   const code = editor.value;
@@ -319,9 +324,9 @@ async function doCompile() {
   const kind = runtimeOf(b);
   const exd = state.exampleId && EXAMPLES.find((e) => e.id === state.exampleId);
   let pre = null;
-  if (exd && kind === 'avr') { const pk = await exampleHexText(exd.id); pre = pk ? { code: exd.code, ...pk } : null; }
+  if (exd && kind === 'avr' && avrMcu(b) === 'uno') { const pk = await exampleHexText(exd.id); pre = pk ? { code: exd.code, ...pk } : null; }
   else if (exd) { const pw = exampleWasm(exd.id); pre = pw ? { code: exd.code, ...pw } : null; }
-  const res = await compile(code, { precompiled: pre, board: kind, libs: kind === 'avr' ? [] : state.libs, getLib: getZip, onProgress: (t) => { setCompilerState(t); $('#buildOut').textContent = t; } });
+  const res = await compile(code, { precompiled: pre, board: kind, mcu: avrMcu(b), libs: kind === 'avr' ? [] : state.libs, getLib: getZip, onProgress: (t) => { setCompilerState(t); $('#buildOut').textContent = t; } });
   $('#buildOut').textContent = [res.stdout, res.stderr].filter(Boolean).join('\n') || '(tidak ada keluaran)';
   const diags = (res.diagnostics?.length ? res.diagnostics : parseDiagnostics(res.stderr)).map((d) => fixMissingSemicolon(d, code));
   editor.setMarks(diags);
@@ -334,7 +339,7 @@ async function doCompile() {
     return false;
   }
   for (const d of diags) addLog('warn', d.message, { line: d.line, col: d.col, msg: d.message });
-  state.hex = res.hex || null; state.wasm = res.wasm || null; state.hexFor = kind + '|' + state.libs.map((l) => l.sha).join(',') + '|' + code; state.hexOnly = false;
+  state.hex = res.hex || null; state.wasm = res.wasm || null; state.hexFor = progKey(b) + '|' + state.libs.map((l) => l.sha).join(',') + '|' + code; state.hexOnly = false;
   for (const line of (res.stdout || '').split('\n')) { if (/^Library Manager:/.test(line)) addLog('info', line); else if (/^PERINGATAN/.test(line)) addLog('warn', line); }
   const size = res.wasm ? `Program ${kind.toUpperCase()} (WebAssembly) ${(res.wasm.length / 1024).toFixed(0)} KB.` : (res.stdout || '').split('\n').find((l) => /Sketch uses/.test(l));
   addLog('ok', `Kompilasi berhasil (${res.source}).${size ? ' ' + size : ''}`);
@@ -364,7 +369,7 @@ async function run() {
     if (state.mode !== 'simulate') setMode('simulate');
     const b = boardOf();
     if (b?.runnable || state.hexOnly) {
-      if (!state.hexOnly && (state.hexFor !== runtimeOf(b) + '|' + state.libs.map((l) => l.sha).join(',') + '|' + editor.value || !currentProg(b))) { if (!(await doCompile())) return; }
+      if (!state.hexOnly && (state.hexFor !== progKey(b) + '|' + state.libs.map((l) => l.sha).join(',') + '|' + editor.value || !currentProg(b))) { if (!(await doCompile())) return; }
       const prog = currentProg(b);
       if (!prog) { addLog('error', 'Belum ada program.'); return; }
       if (!(await buildSim(prog))) return;
@@ -514,8 +519,34 @@ const HINTS = {
   'mod-tds': 'Rumus DFRobot: ppm = (133,42V³ − 255,86V² + 857,39V) × 0,5.', 'mod-ph': 'pH = 7 + (2,5 − V) / 0,18.', 'mod-mosfet': 'SIG HIGH/PWM menyambungkan V− ke GND, sehingga beban di antara V+ dan V− menyala.',
   'mod-npn': 'Basis butuh resistor (mis. 1 kΩ). Kolektor ke beban, emitor ke GND.', 'x-breadboard-half': 'Lubang a–e satu kolom terhubung; f–j satu kolom terhubung; rel + dan − terhubung sepanjang baris. Seret komponen ke lubang: kaki akan menempel otomatis.',
   'x-breadboard-mini': 'Lubang a–e satu kolom terhubung; f–j satu kolom terhubung.',
-  'wokwi-esp32-devkit-v1': 'Mode desain: wiring diperiksa (pin 3.3 V, ADC2, pin input-only 34–39, strapping). Kode tidak dijalankan.',
-  'mod-esp32-cam': 'Untuk proyek kamera/Edge Impulse. GPIO bebas terbatas (2, 4, 12, 13, 14, 15). Mode desain; kode tidak dijalankan.',
+  'wokwi-esp32-devkit-v1': 'Kode ESP32 dijalankan (WiFi, HTTP, Bluetooth, Serial1/Serial2). GPIO keluaran 3,3 V. ADC2 tidak bisa dipakai saat WiFi aktif; GPIO34–39 hanya input.',
+  'mod-esp32-cam': 'Kode dijalankan; kamera memakai kamera perangkat / foto yang diunggah. GPIO bebas terbatas (2, 4, 12, 13, 14, 15).',
+  'wokwi-franzininho': 'ATtiny85 (ATTinyCore): pin 0–5 = PB0–PB5, LED di PB1, analog A1=PB2, A2=PB4, A3=PB3. Serial hanya kirim (TX di PB0). I2C: SDA PB0, SCL PB2.',
+  'wokwi-arduino-mega': 'ATmega2560: pin 0–53, A0–A15, PWM 2–13 & 44–46, Serial1 (18/19), Serial2 (16/17), Serial3 (14/15), I2C SDA 20 / SCL 21, SPI 50–53. RAM 8 KB.',
+  'mod-ds18b20': 'OneWire + DallasTemperature. Wajib resistor 4,7 kΩ antara DQ dan VDD. Beberapa sensor boleh satu jalur (dibedakan alamat ROM-nya).',
+  'mod-tm1637': 'Library TM1637Display: TM1637Display d(CLK, DIO); d.setBrightness(7); d.showNumberDec(1234);',
+  'wokwi-hx711': 'Library HX711 (bogde): scale.begin(DT, SCK); tare(), lalu set_scale(faktor kalibrasi). 1 mV/V × gain 128.',
+  'mod-bmp280': 'Adafruit_BMP280: bmp.begin(0x76). readAltitude(1013.25) menghitung ketinggian dari tekanan.',
+  'mod-bme280': 'Adafruit_BME280: bme.begin(0x76). Suhu, kelembapan, tekanan. Library BME280 tidak menerima chip BMP280 (ID berbeda).',
+  'mod-max30102': 'SparkFun MAX3010x: particleSensor.begin(Wire, I2C_SPEED_FAST); IR < 50000 berarti tidak ada jari. Algoritma SpO2 butuh RAM besar (pakai ESP32/Mega).',
+  'mod-max7219': 'LedControl lc(DIN, CLK, CS, 1) atau MD_MAX72XX (SPI). Bit 7 tiap baris = LED paling kiri. Ingat lc.shutdown(0, false).',
+  'mod-max7219-4': 'MD_Parola P(MD_MAX72XX::FC16_HW, CS, 4); P.begin(); P.displayText(...). DIN→MOSI (11 Uno / 51 Mega), CLK→SCK (13 / 52).',
+  'wokwi-ssd1306': 'OLED SPI: Adafruit_SSD1306 d(128, 64, &SPI, DC, RST, CS) atau software SPI d(128, 64, MOSI, CLK, DC, RST, CS).',
+  'wokwi-ili9341': 'Adafruit_ILI9341 tft(CS, DC, RST) dengan SPI hardware (MOSI 11, SCK 13, MISO 12 pada Uno). Warna RGB565.',
+  'wokwi-microsd-card': 'Library SD: SD.begin(CS). Kartu FAT16 64 MB; isi kartu tetap ada saat program diulang. DI=MOSI, DO=MISO.',
+  'mod-rc522': 'Library MFRC522: MFRC522 rfid(SS, RST). Pin "SDA" = chip select SPI. Pilih kartu di properti untuk menempelkannya; kartu MIFARE 1K dengan kunci FFFFFFFFFFFF.',
+  'mod-nrf24': 'Library RF24: RF24 radio(CE, CSN). VCC 3,3 V! Paket terlihat di log. Pilih "gema" untuk uji kirim-terima dengan satu board, atau pasang dua modul.',
+  'mod-lora': 'LoRa (Sandeep Mistry): LoRa.setPins(NSS, RST, DIO0); LoRa.begin(433E6). Waktu kirim sesuai time-on-air sebenarnya (SF, BW).',
+  'mod-gps': 'TinyGPS++ dengan SoftwareSerial(RX, TX) 9600 baud. TX GPS → pin RX Arduino. Atur posisi di properti.',
+  'mod-hc05': 'SoftwareSerial bt(RX, TX); bt.begin(9600). Data muncul di tab Bluetooth. EN ke 5V saat menyala = mode AT (38400).',
+  'mod-sim800l': 'AT command lewat Serial (9600). SMS: AT+CMGF=1, AT+CMGS="nomor", teks, lalu karakter 26 (Ctrl-Z). SMS & panggilan tampil di log.',
+  'mod-esp01': 'Firmware AT (115200, bisa diubah). 3V3 dan EN ke 3,3 V. AT+CWJAP lalu AT+CIPSTART/CIPSEND mengirim HTTP sungguhan lewat browser.',
+  'mod-capacitor': 'Muatan mengikuti τ = R·C (R = resistor yang terhubung ke kaki +). Perhatikan polaritas dan rating tegangan.',
+  'mod-diode': 'Arus hanya mengalir dari A (anoda) ke K (katoda) dengan jatuh tegangan Vf.',
+  'wokwi-ks2e-m-dc5': 'Relay 5 V tanpa driver: jangan langsung dari pin Arduino; pakai transistor + dioda flyback.',
+  'wokwi-stepper-motor': 'Gunakan driver (L298N/ULN2003/A4988). Library Stepper/AccelStepper. 200 langkah = 1 putaran (1,8°).',
+  'wokwi-heart-beat-sensor': 'OUT berupa denyut digital sesuai BPM.', 'wokwi-rotary-dialer': 'Pin DIAL dan PULSE pakai INPUT_PULLUP; hitung pulsa saat DIAL LOW.',
+  'wokwi-ir-receiver': 'Library IRremote: IrReceiver.begin(pin). Tekan tombol remote IR di kanvas. Protokol NEC.',
 };
 const WIRE_COLORS = ['#e11d48', '#1f2937', '#f5a524', '#2fbf71', '#3d8bfd', '#a855f7', '#06b6d4', '#fb923c', '#ffffff'];
 function renderProps(soft) {
@@ -543,12 +574,24 @@ function renderProps(soft) {
     else html += `<div class="prop-row"><label>${esc(p.label)}</label><input type="text" data-k="${p.key}" value="${esc(v ?? '')}"></div>`;
   }
   if (HINTS[part.type]) html += `<div class="prop-hint">${esc(HINTS[part.type])}</div>`;
+  if (part.type === 'wokwi-microsd-card') {                    // files the sketch wrote on the virtual card
+    const bh = sim.behaviors.find((b) => b._part?.id === part.id && b.files);
+    let files = []; try { files = bh ? bh.files() : []; } catch { files = []; }
+    html += `<div class="prop-pins"><h4>Isi kartu SD (${files.length} berkas)</h4>${files.length ? `<table>${files.map((f, i) => `<tr><td>${esc(f.name)}</td><td>${f.size} B <button class="btn" data-sd="${i}">Unduh</button></td></tr>`).join('')}</table>` : '<div class="prop-empty">Belum ada berkas. Jalankan program yang menulis ke kartu.</div>'}<button class="btn" id="sdRefresh">Muat ulang daftar</button></div>`;
+    state.sdFiles = files;
+  }
   html += `<div class="prop-actions"><button class="btn" id="pRot"><svg><use href="#i-rotr"/></svg><span>Putar</span></button><button class="btn" id="dupPart"><svg><use href="#i-copy"/></svg><span>Duplikat</span></button><button class="btn danger" id="delPart"><svg><use href="#i-trash"/></svg><span>Hapus</span></button></div>`;
   if (!cat?.breadboard) {
     const wired = new Set(canvas.wires.flatMap((w) => [w.a, w.b]));
     html += `<div class="prop-pins"><h4>Pin (${part.pinInfo.length})</h4><table>${part.pinInfo.map((i) => { const g = cat?.gpio?.[i.name]; return `<tr><td>${esc(canvas.pinLabel(part, i))}${typeof g === 'number' ? ` <span class="muted">GPIO${g}</span>` : ''}</td><td>${wired.has(part.id + ':' + i.name) ? 'terhubung' : '—'}</td></tr>`; }).join('')}</table></div>`;
   }
   host.innerHTML = html;
+  host.querySelectorAll('[data-sd]').forEach((b) => (b.onclick = () => {
+    const f = state.sdFiles?.[+b.dataset.sd]; if (!f) return;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([f.data()], { type: 'application/octet-stream' }));
+    a.download = f.name.split('/').pop().toLowerCase(); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }));
+  const sdr = host.querySelector('#sdRefresh'); if (sdr) sdr.onclick = () => renderProps();
   host.querySelectorAll('[data-k]').forEach((inp) => {
     inp.oninput = inp.onchange = (ev) => {
       const p = cat.props.find((x) => x.key === inp.dataset.k);

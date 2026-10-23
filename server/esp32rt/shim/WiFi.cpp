@@ -1,6 +1,14 @@
 #include "WiFi.h"
 WiFiClass WiFi;
-wl_status_t WiFiClass::begin(const char *ssid, const char *pass, int32_t, const uint8_t *, bool) { _ssid = ssid ? ssid : ""; h_wifi_begin(ssid ? ssid : "", pass ? pass : ""); return status(); }
+wl_status_t WiFiClass::begin(const char *ssid, const char *pass, int32_t, const uint8_t *, bool) {
+  _ssid = ssid ? ssid : ""; h_wifi_begin(ssid ? ssid : "", pass ? pass : "");
+#if defined(ARDUINO_NANO_RP2040_CONNECT)
+  // WiFiNINA: begin() blocks until the module has joined (or failed), and returns the final status
+  unsigned long t0 = millis();
+  while (status() != WL_CONNECTED && status() != WL_CONNECT_FAILED && millis() - t0 < 10000) delay(100);
+#endif
+  return status();
+}
 wl_status_t WiFiClass::status() { return (wl_status_t)h_wifi_status(); }
 bool WiFiClass::disconnect(bool, bool) { h_wifi_begin("", ""); return true; }
 static IPAddress info_ip(int what) { char b[32] = {0}; h_wifi_info(what, b, sizeof b); IPAddress ip; ip.fromString(b); return ip; }

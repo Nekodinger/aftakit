@@ -28,7 +28,7 @@ export function parseDiagnostics(text) {
   return out;
 }
 
-const BOARD_NAME = { avr: 'Arduino Uno/Nano', esp32: 'ESP32', esp8266: 'ESP8266', rp2040: 'Raspberry Pi Pico' };
+const BOARD_NAME = { avr: 'Arduino Uno/Nano/Mega', esp32: 'ESP32', esp8266: 'ESP8266', rp2040: 'Raspberry Pi Pico', nanorp2040: 'Arduino Nano RP2040 Connect' };
 const b64bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
 /** board: 'avr' (default) or a WebAssembly runtime ('esp32' | 'esp8266' | 'rp2040').
@@ -74,7 +74,7 @@ async function waitJob(base, data, onProgress, again) {
   return data;
 }
 
-export async function compile(code, { precompiled, board = 'avr', libs = [], getLib, onProgress } = {}) {
+export async function compile(code, { precompiled, board = 'avr', mcu = 'uno', libs = [], getLib, onProgress } = {}) {
   if (precompiled && precompiled.code === code && precompiled.hex && board === 'avr') {
     return { ok: true, hex: precompiled.hex, stdout: precompiled.info || '', stderr: '', diagnostics: [], source: 'contoh (prakompilasi)' };
   }
@@ -82,13 +82,13 @@ export async function compile(code, { precompiled, board = 'avr', libs = [], get
     try { return { ok: true, wasm: await precompiled.wasm(), stdout: '', stderr: '', diagnostics: [], source: 'contoh (prakompilasi)' }; }
     catch (e) { return fail('Gagal memuat program contoh: ' + e.message + '. Periksa koneksi internet lalu coba lagi.', 'network'); }
   }
-  const key = board + ':' + libs.map((l) => l.sha).join(',') + ':' + (await hash(code));
+  const key = board + (board === 'avr' ? '/' + mcu : '') + ':' + libs.map((l) => l.sha).join(',') + ':' + (await hash(code));
   if (cache.has(key)) return { ...cache.get(key), source: 'cache' };
 
   const ep = compileEndpoint(board);
   if (ep) {
     let res;
-    const post = () => fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sketch: code, board, libs: libs.map((l) => l.sha) }), signal: AbortSignal.timeout(320000) });
+    const post = () => fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sketch: code, board, mcu, libs: libs.map((l) => l.sha) }), signal: AbortSignal.timeout(320000) });
     if (libs.length && board !== 'avr') {
       try { await ensureLibs(compileBase(), libs, getLib, onProgress); } catch (e) { return fail(e.message, 'server'); }
     }

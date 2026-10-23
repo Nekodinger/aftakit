@@ -24,7 +24,8 @@ TIMEOUT = int(os.environ.get("COMPILE_TIMEOUT", "300"))
 JOBS = max(1, int(os.environ.get("COMPILE_JOBS", "0")) or (os.cpu_count() or 1))
 BOARDS = {"esp32": ["-DESP32", "-DARDUINO_ARCH_ESP32", "-DARDUINO_ESP32_DEV", "-DSIM_BOARD_ESP32"],
           "esp8266": ["-DESP8266", "-DARDUINO_ARCH_ESP8266", "-DARDUINO_ESP8266_NODEMCU", "-DSIM_BOARD_ESP8266", "-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "esp32rt", "shim8266")],
-          "rp2040": ["-DARDUINO_ARCH_RP2040", "-DARDUINO_RASPBERRY_PI_PICO", "-DSIM_BOARD_RP2040"]}
+          "rp2040": ["-DARDUINO_ARCH_RP2040", "-DARDUINO_RASPBERRY_PI_PICO", "-DSIM_BOARD_RP2040"],
+          "nanorp2040": ["-DARDUINO_ARCH_RP2040", "-DARDUINO_NANO_RP2040_CONNECT", "-DSIM_BOARD_NANORP2040"]}
 COMMON = ["--target=wasm32-wasip1", "--sysroot=" + SYSROOT, "-O2", "-fno-exceptions", "-fno-rtti", "-D_WASI_EMULATED_SIGNAL",
           "-DARDUINO=10819", "-Wno-everything", "-ffunction-sections", "-fdata-sections"]
 CXXFLAGS = ["-std=gnu++17", "-fno-threadsafe-statics"] + COMMON
@@ -39,8 +40,26 @@ LIBS = {
     "Adafruit_BusIO_Register.h": os.path.join(SRC, "Adafruit_BusIO"),
     "RTClib.h": os.path.join(SRC, "RTClib"),
     "LiquidCrystal.h": os.path.join(SRC, "LiquidCrystal"),
+    "OneWire.h": os.path.join(RT, "OneWire"),              # OneWire with the portable pinMode/digitalRead fallback (no ESP32 register access in wasm)
+    "DallasTemperature.h": os.path.join(SRC, "Arduino-Temperature-Control-Library"),
+    "TM1637Display.h": os.path.join(SRC, "TM1637"),
+    "HX711.h": os.path.join(SRC, "HX711", "src"),
+    "Adafruit_Sensor.h": os.path.join(SRC, "Adafruit_Sensor"),
+    "Adafruit_BMP280.h": os.path.join(SRC, "Adafruit_BMP280_Library"),
+    "Adafruit_BME280.h": os.path.join(SRC, "Adafruit_BME280_Library"),
+    "MAX30105.h": os.path.join(SRC, "SparkFun_MAX3010x_Sensor_Library", "src"),
+    "LedControl.h": os.path.join(SRC, "LedControl", "src"),
+    "MD_MAX72xx.h": os.path.join(SRC, "MD_MAX72XX", "src"),
+    "MD_Parola.h": os.path.join(SRC, "MD_Parola", "src"),
+    "Adafruit_ILI9341.h": os.path.join(SRC, "Adafruit_ILI9341"),
+    "MFRC522.h": os.path.join(SRC, "rfid", "src"),
+    "RF24.h": os.path.join(SRC, "RF24"),
+    "LoRa.h": os.path.join(SRC, "arduino-LoRa", "src"),
+    "TinyGPS++.h": os.path.join(SRC, "TinyGPSPlus", "src"),
+    "TinyGPSPlus.h": os.path.join(SRC, "TinyGPSPlus", "src"),
+    "SD.h": os.path.join(RT, "SD"),                       # Arduino SD with the generic pin map + ESP32 API extras
 }
-DEPS = {"Adafruit_GFX.h": ["Adafruit_I2CDevice.h"], "Adafruit_SSD1306.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "RTClib.h": ["Adafruit_I2CDevice.h"]}
+DEPS = {"Adafruit_GFX.h": ["Adafruit_I2CDevice.h"], "Adafruit_SSD1306.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "RTClib.h": ["Adafruit_I2CDevice.h"], "DallasTemperature.h": ["OneWire.h"], "MD_Parola.h": ["MD_MAX72xx.h"], "Adafruit_ILI9341.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "Adafruit_BMP280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"], "Adafruit_BME280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"]}
 ASYNC_IMPORTS = "ard.delay_us,ard.yield_,ard.http,ard.net_open,ard.net_dns"
 _lock = threading.RLock()
 

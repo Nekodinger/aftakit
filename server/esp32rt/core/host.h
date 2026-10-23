@@ -18,9 +18,13 @@ ARD_IMPORT(serial_write) void h_serial_write(int port, const uint8_t *p, int n);
 ARD_IMPORT(serial_available) int h_serial_available(int port);
 ARD_IMPORT(serial_read) int h_serial_read(int port);
 ARD_IMPORT(serial_begin) void h_serial_begin(int port, int baud);
+ARD_IMPORT(serial_pins) void h_serial_pins(int port, int rx, int tx);       // GPIOs of a UART port (-1 = board default)
 ARD_IMPORT(i2c_begin) void h_i2c_begin(int sda, int scl);
 ARD_IMPORT(i2c_tx) int h_i2c_tx(int addr, const uint8_t *p, int n, int stop);
 ARD_IMPORT(i2c_rx) int h_i2c_rx(int addr, uint8_t *p, int n);
+ARD_IMPORT(spi_begin) void h_spi_begin(int sck, int miso, int mosi);
+ARD_IMPORT(spi_xfer) void h_spi_xfer(uint8_t *p, int n);             // full duplex, in place
+ARD_IMPORT(ir_read) int h_ir_read(int pin, int32_t *addr_cmd_repeat);           // decoded NEC frame from an IR receiver
 ARD_IMPORT(dht_read) int h_dht_read(int pin, int type, float *out2);
 ARD_IMPORT(pulse_in) double h_pulse_in(int pin, int state, double timeout_us);
 ARD_IMPORT(servo_write) void h_servo_write(int pin, double us);

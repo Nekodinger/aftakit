@@ -8,7 +8,7 @@ const US = 16; // CPU cycles per microsecond at 16 MHz
 
 const VCC_NAMES = ['VCC', '+', 'V+', 'VIN', '5V', 'VDD', '3V3'], GND_NAMES = ['GND', '-', 'G', 'VSS'];
 function rails(ctx) {
-  const names = new Set(ctx.el.pinInfo.map((p) => p.name.split('.')[0]));
+  const names = new Set(ctx.el.pinInfo.map((p) => (/^\d+\.\d+V$/.test(p.name) ? p.name : p.name.split('.')[0])));
   return { vcc: VCC_NAMES.find((n) => names.has(n)), gnd: GND_NAMES.find((n) => names.has(n)) };
 }
 function supply(ctx, v) {
@@ -180,6 +180,7 @@ const motor = ({ a, b, spin = 1 }) => (ctx) => {
 const l298n = (ctx) => {
   let st = { a: 0, b: 0 };
   return {
+    logicPins: () => ['IN1', 'IN2', 'IN3', 'IN4'].map((p) => ctx.n(p)).filter((n) => n >= 0),
     drivers2(v) {
       const vs = v(ctx.n('12V')), g = v(ctx.n('GND'));
       const out = [];
@@ -290,3 +291,6 @@ export const BEHAVIORS2 = {
   'mod-traffic': indicator([['R', 'R'], ['Y', 'Y'], ['G', 'G']], 'GND'),
   'mod-battery9v': battery('voltage', 9), 'mod-battery18650': battery('voltage', 3.7), 'mod-solar': solar, 'mod-buck': buck,
 };
+
+// helpers shared with behaviors3.js
+export const H = { clamp, live, attr, V, US, supply, warnSupply, led, analogSensor, digitalSensor, pulseWave, lvl, thr };

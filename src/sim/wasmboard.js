@@ -7,15 +7,18 @@ const ESP32_ADC1 = new Set([32, 33, 34, 35, 36, 37, 38, 39]);
 const ESP32_ADC2 = new Set([0, 2, 4, 12, 13, 14, 15, 25, 26, 27]);
 const te = new TextEncoder(), td = new TextDecoder();
 
+// default UART pins (RX, TX GPIO) per port: ESP32 UART0/1/2, ESP8266 UART0 / UART1 (TX only), RP2040 Serial1/Serial2
+const UART_PINS = { esp32: { 0: [3, 1], 1: [9, 10], 2: [16, 17] }, esp8266: { 0: [3, 1], 1: [-1, 2] }, rp2040: { 1: [1, 0], 2: [5, 4] }, nanorp2040: { 1: [0, 1] } };
+
 export class WasmBoard {
   constructor(kind, gpioMap, host) {
-    this.kind = kind; this.host = host;                 // host: { sim, partsOnNet(net), netOfPin(name), proxyUrl }
+    this.kind = kind; this.host = host; this.vHigh = 3.3 / 5;   // 3.3 V GPIO                 // host: { sim, partsOnNet(net), netOfPin(name), proxyUrl }
     this.gpioToName = {}; this.pinMap = {};
     for (const [name, g] of Object.entries(gpioMap || {})) {
       const gpio = g === 'A0' ? 17 : g;                  // ESP8266 A0 is mapped to pseudo-GPIO 17 by the runtime
       if (typeof gpio !== 'number') continue;
       this.gpioToName[gpio] = name;
-      const adc = kind === 'esp32' ? ESP32_ADC1.has(gpio) || ESP32_ADC2.has(gpio) : kind === 'esp8266' ? gpio === 17 : gpio >= 26 && gpio <= 28;
+      const adc = kind === 'esp32' ? ESP32_ADC1.has(gpio) || ESP32_ADC2.has(gpio) : kind === 'esp8266' ? gpio === 17 : kind === 'nanorp2040' ? gpio >= 14 && gpio <= 21 && gpio !== 18 && gpio !== 19 : gpio >= 26 && gpio <= 28;
       this.pinMap[name] = { gpio, adc, port: gpio !== 17 || kind !== 'esp8266' };
     }
     this.inputThreshold = 0.33;                          // 3.3 V logic: HIGH above ~1.65 V
@@ -30,7 +33,7 @@ export class WasmBoard {
     this.events = []; this.cpu.cycles = 0; this.faults = [];
     this.analog = {}; this.mode = {}; this.out = {}; this.ext = {}; this.irq = {}; this.irqCount = {};
     for (const name of Object.keys(this.pinMap)) this.pins[name] = { level: null, last: 0, lastRise: -1, lastFall: -1, pulse: -1, duty: null, freq: 0, servo: false };
-    this.serialIn = []; this.btIn = []; this.wifi = { ssid: '', since: -1 }; this.httpResp = new Uint8Array(0);
+    this.serialIn = []; this.portIn = {}; this.btIn = []; this.wifi = { ssid: '', since: -1 }; this.httpResp = new Uint8Array(0);
     this.bootWall = Date.now(); this.state = 'idle'; this.inst = null; this.dirty = false; this.calls = 0; this.fx = 0; this._fxSeen = -1; this.idle = 0;
   }
   driveLevel(name) { const m = this.mode[name]; if (m !== 'out') return null; const p = this.pins[name]; if (p.freq > 0 && p.duty !== null) return p.duty > 0.5 ? 1 : 0; return this.out[name] ? 1 : 0; }
@@ -47,6 +50,7 @@ export class WasmBoard {
   clearListeners() { this.edgeListeners = {}; this.serialListeners = this.serialListeners.filter((l) => l.keep); }
   sampleWindow() {}
   serialWrite(b) { this.serialIn.push(b); }
+  serialIn2(port, b) { this.fx++; if (port === 0) this.serialIn.push(b); else (this.portIn[port] ||= []).push(b); }
   btWrite(text) { for (const b of te.encode(text)) this.btIn.push(b); }
 
   // ------------------------------------------------------------------ program loading
@@ -137,6 +141,8 @@ export class WasmBoard {
     if (p.level === 1 && lvl !== 1 && p.lastRise >= 0) { p.pulse = c - p.lastRise; p.lastFall = c; }
     p.level = lvl; p.last = c; this.dirty = true; this.fx++;
     for (const f of this.edgeListeners[name] || []) f(lvl, c);
+    const sim = this.host.sim;
+    if ((sim.fine || sim.finePins?.has(name)) && !sim._resolving && sim.circuit) { sim._resolving = true; try { sim.resolveNow(); } finally { sim._resolving = false; } }
   }
   _fresh() { if (this.dirty) { this.dirty = false; this.host.sim.resolveNow(); } }
 
@@ -153,7 +159,8 @@ export class WasmBoard {
       },
       digital_write(gpio, v) {
         const n = self._name(gpio); if (!n) return;
-        if (self.mode[n] !== 'out') { if (v && self.mode[n] !== 'pullup') { self.mode[n] = 'pullup'; self.dirty = true; } else if (!v && self.mode[n] === 'pullup') { self.mode[n] = 'in'; self.dirty = true; } return; }
+        if (self.mode[n] !== 'out') { self.out[n] = !!v;   // the output latch is written even while the pin is an input (1-Wire: digitalWrite(LOW) then pinMode(OUTPUT))
+          if (v && self.mode[n] !== 'pullup') { self.mode[n] = 'pullup'; self.dirty = true; } else if (!v && self.mode[n] === 'pullup') { self.mode[n] = 'in'; self.dirty = true; } return; }
         const p = self.pins[n]; p.freq = 0; p.duty = null; self.out[n] = !!v; self._setLevel(n, v ? 1 : 0);
       },
       digital_read(gpio) {
@@ -163,7 +170,7 @@ export class WasmBoard {
       },
       analog_mv(gpio) {
         const n = self._name(gpio); if (!n) return -1;
-        if (!self.pinMap[n].adc) { sim().warn(`adc-${gpio}`, `analogRead(${gpio}): ${n} bukan pin ADC. ${self.kind === 'esp32' ? 'Gunakan GPIO32–39 (ADC1).' : self.kind === 'esp8266' ? 'ESP8266 hanya punya satu pin analog: A0.' : 'Pico: GP26, GP27, GP28.'}`); return 0; }
+        if (!self.pinMap[n].adc) { sim().warn(`adc-${gpio}`, `analogRead(${gpio}): ${n} bukan pin ADC. ${self.kind === 'esp32' ? 'Gunakan GPIO32–39 (ADC1).' : self.kind === 'esp8266' ? 'ESP8266 hanya punya satu pin analog: A0.' : self.kind === 'nanorp2040' ? 'Nano RP2040 Connect: A0–A3, A6, A7 (A4/A5 dipakai I2C).' : 'Pico: GP26, GP27, GP28.'}`); return 0; }
         if (self.kind === 'esp32' && ESP32_ADC2.has(gpio) && self._wifiOn()) { sim().warn(`adc2-${gpio}`, `analogRead(${gpio}) gagal: ADC2 tidak bisa dipakai saat WiFi aktif (sama seperti ESP32 asli). Pindahkan sensor ke GPIO32–39.`); return 0; }
         self._fresh(); return mv(n);
       },
@@ -197,12 +204,27 @@ export class WasmBoard {
         if (self._rewinding()) return;
         self._suspend('yielded', {});
       },
-      serial_begin() {},
-      serial_write(port, ptr, n) { self.fx++; const b = self.u8.slice(ptr, ptr + n); for (const x of b) for (const l of self.serialListeners) l(x); },
-      serial_available() { return self.serialIn.length; },
-      serial_read() { return self.serialIn.length ? self.serialIn.shift() : -1; },
+      serial_begin(port, baud) {
+        const d = UART_PINS[self.kind]?.[port] || [-1, -1], cur = self.host.sim.uart.ports[port] || {};
+        self.host.serialPort(port, cur.rx ?? (d[0] >= 0 ? self.gpioToName[d[0]] : null), cur.tx ?? (d[1] >= 0 ? self.gpioToName[d[1]] : null), baud);
+      },
+      serial_pins(port, rx, tx) { self.host.serialPort(port, rx >= 0 ? self._name(rx) : undefined, tx >= 0 ? self._name(tx) : undefined); },
+      serial_write(port, ptr, n) {
+        self.fx++; const b = self.u8.slice(ptr, ptr + n);
+        if (port === 0) for (const x of b) for (const l of self.serialListeners) l(x);   // Serial -> Serial Monitor
+        self.host.serialOut(port, b);                                                       // ... and to modules on the port's TX pin
+      },
+      serial_available(port) { return port === 0 ? self.serialIn.length : (self.portIn[port]?.length || 0); },
+      serial_read(port) { const q = port === 0 ? self.serialIn : self.portIn[port]; return q?.length ? q.shift() : -1; },
       i2c_begin(sda, scl) { self.host.setI2cPins(self._name(sda), self._name(scl)); },
       i2c_tx(addr, ptr, n, stop) { self.fx++; self._fresh(); return self.host.i2cWrite(addr, self.u8.slice(ptr, ptr + n), !!stop); },
+      ir_read(gpio, ptr) {                                     // IRremote replacement: next decoded NEC frame on this pin
+        const n = self._name(gpio); if (!n) return 0;
+        const q = self.host.sim._ir?.[self.host.sim.ardNets[n]]; if (!q?.length) return 0;
+        const f = q.shift(); new Int32Array(self.mem.buffer, ptr, 3).set([f.addr, f.cmd, f.repeat]); self.fx++; return 1;
+      },
+      spi_begin(sck, miso, mosi) { self.host.setSpiPins(sck >= 0 ? self._name(sck) : null, mosi >= 0 ? self._name(mosi) : null, miso >= 0 ? self._name(miso) : null); },
+      spi_xfer(ptr, n) { self.fx++; self._fresh(); for (let i = 0; i < n; i++) { self.cpu.cycles += US; self.u8[ptr + i] = self.host.spiXfer(self.u8[ptr + i]); } },   // ~1 us per byte (8 MHz SCK)
       i2c_rx(addr, ptr, n) { self._fresh(); const r = self.host.i2cRead(addr, n); self.u8.set(r, ptr); return r.length; },
       dht_read(gpio, type, outPtr) {
         const n = self._name(gpio); if (!n) return 0; self._fresh();

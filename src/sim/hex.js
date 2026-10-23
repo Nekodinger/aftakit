@@ -1,6 +1,6 @@
 // Intel HEX -> Uint8Array. Throws Error with a readable message on malformed input.
-export function parseHex(text) {
-  const bytes = new Uint8Array(32 * 1024).fill(0xff);
+export function parseHex(text, flash = 32 * 1024) {
+  const bytes = new Uint8Array(flash).fill(0xff);
   let ext = 0, max = 0, lines = 0;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -17,7 +17,7 @@ export function parseHex(text) {
     if (type === 0) {
       for (let i = 0; i < len; i++) {
         const a = ext + addr + i;
-        if (a >= bytes.length) throw new Error('Program melebihi 32 KB flash ATmega328P');
+        if (a >= bytes.length) throw new Error(`Program melebihi ${flash / 1024} KB flash mikrokontroler ini`);
         bytes[a] = parseInt(line.substr(9 + i * 2, 2), 16);
         if (a + 1 > max) max = a + 1;
       }

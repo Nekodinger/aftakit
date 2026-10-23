@@ -16,7 +16,10 @@ INDEX_URL = os.environ.get("ARDUINO_LIB_INDEX", "https://downloads.arduino.cc/li
 LIB_DIR = os.path.join(CACHE, "arduino-libs")
 ULIB_DIR = os.path.join(CACHE, "user-libs-x")
 USER_LIBS = os.environ.get("USER_LIBS", os.path.join(CACHE, "user-libs"))
-SKIP_DIRS = ("/examples/", "/extras/", "/test/", "/tests/", "/docs/", "/doc/", "/fontconvert/", "/tools/", "/.git/")
+SKIP_DIRS = ("/examples/", "/extras/", "/test/", "/tests/", "/docs/", "/doc/", "/fontconvert/", "/tools/", "/.git/",
+             # RF24: Linux / other-MCU drivers that are not part of the Arduino build
+             "/pyRF24/", "/examples_linux/", "/examples_pico/", "/utility/RPi/", "/utility/SPIDEV/", "/utility/MRAA/", "/utility/wiringPi/",
+             "/utility/pigpio/", "/utility/rp2/", "/utility/LittleWire/", "/utility/ATXMegaD3/", "/utility/Teensy/", "/utility/ATTiny/", "/utility/Template/")
 _lock = threading.RLock()
 _index = None            # header -> [(name, version, url, repo)]
 _index_err = None

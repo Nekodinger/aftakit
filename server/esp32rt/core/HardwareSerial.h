@@ -19,9 +19,10 @@ public:
   operator bool() const { return true; }
   void setDebugOutput(bool) {}
   void setRxBufferSize(size_t) {}
+  void setPins(int8_t rx, int8_t tx, int8_t = -1, int8_t = -1);
   void updateBaudRate(unsigned long) {}
   unsigned long baudRate() { return _baud; }
-private:
+protected:
   int _port; int _peeked = -1; unsigned long _baud = 115200;
 };
 extern HardwareSerial Serial;

@@ -1,5 +1,6 @@
 // Behaviours that connect I2C part elements to device models on the simulator's I2C bus.
 import { LcdI2C, SSD1306, MPU6050, RTC } from './i2c.js';
+import { BoschEnv, MAX30102 } from './i2cEnv.js';
 
 const live = (x) => x !== null && x !== undefined;
 const attr = (ctx, k, d) => (ctx.part.attrs?.[k] ?? d);
@@ -17,7 +18,7 @@ function i2cPart(ctx, { vcc, gnd, sda = 'SDA', scl = 'SCL', make, addr }) {
         wired = okSda && okScl;
         if (!wired) {
           const miss = [!okSda && `${sda} → ${bus[0]}`, !okScl && `${scl} → ${bus[1]}`].filter(Boolean).join(', ');
-          sim.warn(`i2c-wire-${ctx.part.id}`, `${ctx.label}: jalur I2C belum benar (${miss}). Pada Uno/Nano, SDA = A4 dan SCL = A5.`);
+          sim.warn(`i2c-wire-${ctx.part.id}`, `${ctx.label}: jalur I2C belum benar (${miss}). ${({ ATmega328P: 'Pada Uno/Nano, SDA = A4 dan SCL = A5.', ATmega2560: 'Pada Mega 2560, SDA = pin 20 dan SCL = pin 21 (juga tersedia di header SDA/SCL dekat AREF).', ATtiny85: 'Pada ATtiny85 (USI), SDA = PB0 dan SCL = PB2.' })[sim.board.mcu?.name] || ''}`);
         }
       }
       sim.i2c.add(addr(), dev, { sda: ctx.n(sda), scl: ctx.n(scl) });
@@ -77,7 +78,22 @@ const mpu = (ctx) => {
 
 const rtc = (kind, vcc) => (ctx) => i2cPart(ctx, { vcc, gnd: 'GND', make: () => new RTC(ctx.label, kind), addr: () => 0x68 });
 
+const bosch = (kind, vcc) => (ctx) => i2cPart(ctx, {
+  vcc, gnd: 'GND',
+  make: () => new BoschEnv(ctx.label, kind, () => ({ temp: +attr(ctx, 'temperature', 24), pressure: +attr(ctx, 'pressure', 1013), humidity: kind === 'bme280' ? +attr(ctx, 'humidity', 50) : 0 })),
+  addr: () => parseInt(attr(ctx, 'address', '0x76'), 16),
+});
+
+const max30102 = (ctx) => i2cPart(ctx, {
+  vcc: 'VIN', gnd: 'GND',
+  make: () => new MAX30102(ctx.label, () => ({ bpm: +attr(ctx, 'bpm', 75), spo2: +attr(ctx, 'spo2', 97), finger: attr(ctx, 'finger', 'ya') !== 'tidak', now: () => ctx.sim.board.cpu.cycles })),
+  addr: () => 0x57,
+});
+
 export const I2C_BEHAVIORS = {
+  'mod-bmp280': bosch('bmp280', 'VCC'),
+  'mod-bme280': bosch('bme280', 'VIN'),
+  'mod-max30102': max30102,
   'x-lcd1602-i2c': lcdI2C(16, 2),
   'x-lcd2004-i2c': lcdI2C(20, 4),
   'mod-oled-i2c': oled,

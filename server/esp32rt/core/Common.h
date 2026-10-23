@@ -67,6 +67,13 @@ extern volatile uint32_t __sim_portreg[4];
 #define portModeRegister(port) (&__sim_portreg[2])
 #define NOT_AN_INTERRUPT -1
 #define interrupts()
+// FreeRTOS critical sections used by real libraries (HX711 ...): the simulator runs a single task
+typedef int portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED 0
+#define portENTER_CRITICAL(m) ((void)(m))
+#define portEXIT_CRITICAL(m) ((void)(m))
+#define portENTER_CRITICAL_ISR(m) ((void)(m))
+#define portEXIT_CRITICAL_ISR(m) ((void)(m))
 #define noInterrupts()
 #define sei()
 #define cli()

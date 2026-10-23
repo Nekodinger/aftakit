@@ -3,7 +3,7 @@
 import { Circuit } from './circuit.js';
 import { BY_TAG } from '../catalog.js';
 
-const base = (p) => p.split('.')[0];
+const base = (p) => (/^\d+\.\d+V$/.test(p) ? p : p.split('.')[0]);
 const POWER_IN = ['VCC', '+', 'V+', 'VIN', '5V', 'VDD', '3V3', '3.3V', '12V'];
 const GND_IN = ['GND', '-', 'G', 'VSS', 'AGND', 'IN-'];
 const ANALOG = {

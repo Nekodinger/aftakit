@@ -1,16 +1,24 @@
 // Orchestrator: wires the AVR core, netlist solver, behaviours and the frame loop together.
 import { AvrBoard, CLOCK_HZ } from './avr.js';
+import { M2560, T85 } from './avrmcu.js';
 import { WasmBoard } from './wasmboard.js';
 import { NetGateway } from './netgw.js';
 import { Circuit } from './circuit.js';
 import { BEHAVIORS as B1 } from './behaviors.js';
 import { BEHAVIORS2 } from './behaviors2.js';
 import { I2C_BEHAVIORS } from './i2cParts.js';
+import { BEHAVIORS3 } from './behaviors3.js';
+import { BEHAVIORS4 } from './behaviors4.js';
+import { BEHAVIORS5 } from './behaviors5.js';
+import { BEHAVIORS6 } from './behaviors6.js';
 import { I2CBus } from './i2c.js';
+import { SpiBus } from './spi.js';
+import { UartHub } from './uart.js';
+import { softSerialMonitor, attachPinI2C } from './pinbus.js';
 import { Audio } from './audio.js';
 import { BY_TAG } from '../catalog.js';
 
-const BEHAVIORS = { ...B1, ...BEHAVIORS2, ...I2C_BEHAVIORS, 'mod-jsn-sr04t': B1['wokwi-hc-sr04'] };
+const BEHAVIORS = { ...B1, ...BEHAVIORS2, ...BEHAVIORS3, ...BEHAVIORS4, ...BEHAVIORS5, ...BEHAVIORS6, ...I2C_BEHAVIORS, 'mod-jsn-sr04t': B1['wokwi-hc-sr04'] };
 // firmware that just idles (rjmp .-2): used when the circuit has no runnable microcontroller
 export const IDLE_HEX = ':02000000FFCF30\n:00000001FF\n';
 
@@ -26,6 +34,8 @@ export class Simulator {
     this.last = null;
     this.circuit = null;
     this.i2c = new I2CBus(this);
+    this.spi = new SpiBus(this);
+    this.uart = new UartHub(this);
     this.avr = new AvrBoard();
     this.board = this.avr;
     this._bindBoard(this.avr);
@@ -36,13 +46,17 @@ export class Simulator {
     board.serialListeners = board.serialListeners.filter((l) => !l.keep);
     board.serialListeners.push(Object.assign((b) => this.emit('serial', b), { keep: true }));
     if (board.kind !== 'avr') return;
-    board.onInit = () => this.i2c.attach(board.twi);
-    this.i2c.attach(board.twi);
+    board.onUsartTx = (i, b) => { if (this.uart.links.length) this.uart.fromMcu(board.mcu.usarts[i].tx, [b], board.usarts[i].baudRate); };   // USARTn TX pin -> serial modules
+    const hookSpi = () => { if (board.spi) board.spi.onTransfer = (v) => this.spi.xfer(v); };
+    const hookTwi = () => { if (board.twi) this.i2c.attach(board.twi); };
+    board.onInit = () => { hookTwi(); hookSpi(); };
+    hookTwi(); hookSpi();
     // A pin driven by firmware that shares a net with a closed switch (keypad matrix, button chains) must
     // be re-solved immediately: sketches write a column and read the rows within a few cycles.
     board.afterChange = (names) => {
-      if (this._resolving || !this.coupled || !this.coupled.size || !this.circuit) return;
-      if (!names.some((n) => this.ardNets && this.coupled.has(this.ardNets[n]))) return;
+      if (this._resolving || !this.circuit) return;
+      // `fine` parts (stepper motors) must see every step of the driver pins, not one sample per 4 ms slice
+      if (!this.fine && !(this.finePins?.size && names.some((n) => this.finePins.has(n))) && (!this.coupled || !this.coupled.size || !names.some((n) => this.ardNets && this.coupled.has(this.ardNets[n])))) return;
       this._resolving = true;
       try { this.resolveNow(); } finally { this._resolving = false; }
     };
@@ -73,6 +87,10 @@ export class Simulator {
       setI2cPins(sda, scl) { sim.i2c.setBus(netOf(sda), netOf(scl)); sim._i2cNames = [sda, scl]; },
       i2cWrite(addr, bytes, stop) { return sim.i2c.txn(addr, bytes, stop); },
       i2cRead(addr, n) { return sim.i2c.rxn(addr, n); },
+      setSpiPins(sck, mosi, miso) { sim.spi.setPins(sck, mosi, miso); },
+      spiXfer(b) { return sim.spi.xfer(b); },
+      serialPort(port, rx, tx, baud) { sim.uart.setPort(port, rx, tx, baud); },
+      serialOut(port, bytes) { const p = sim.uart.ports[port]; if (p?.tx && sim.uart.links.length) sim.uart.fromMcu(p.tx, bytes, p.baud); },
       dhtRead(name, type) {
         const hit = partsOn(netOf(name)).find((m) => (partById(m.id)?.type === 'wokwi-dht22' && m.pin === 'SDA') || (partById(m.id)?.type === 'mod-dht11' && m.pin === 'DATA'));
         if (!hit) { sim.warn(`dht-none-${name}`, `DHT: tidak ada sensor DHT yang pin datanya terhubung ke ${name}.`); return null; }
@@ -167,15 +185,17 @@ export class Simulator {
     const anyBoard = model.parts.find((p) => BY_TAG[p.type]?.board);
     const boardPart = anyBoard && BY_TAG[anyBoard.type].sim === 'full' ? anyBoard : null;
     this.boardPart = boardPart; this.designBoard = boardPart ? null : anyBoard || null;
-    this.i2c.clear();
+    this.i2c.clear(); this.spi.clear(); this.uart.clear();
     // pick the execution engine: AVR emulator, or the WebAssembly Arduino runtime (ESP32 / ESP8266 / RP2040)
     const bcat = boardPart ? BY_TAG[boardPart.type] : null;
     if (bcat?.runtime === 'wasm') {
       this.board = new WasmBoard(bcat.wasm, bcat.gpio, this._wasmHost()); this._bindBoard(this.board);
       this.net = new NetGateway(this.gatewayUrl || '', (lvl, t) => (lvl === 'warn' ? this.warn('gw:' + t, t) : this.info(t)));
     }
-    else { this.board = this.avr; }
-    const I2C_DEFAULT = { avr: [12, 13], esp32: [21, 22], esp8266: [4, 5], rp2040: [4, 5] };
+    else if (bcat?.board === 'mega') { if (!this.mega) { this.mega = new AvrBoard(M2560); } if (this.board !== this.mega) { this.board = this.mega; this._bindBoard(this.mega); } }
+    else if (bcat?.board === 'attiny85') { if (!this.tiny) { this.tiny = new AvrBoard(T85); } if (this.board !== this.tiny) { this.board = this.tiny; this._bindBoard(this.tiny); } }
+    else if (this.board !== this.avr) { this.board = this.avr; this._bindBoard(this.avr); }
+    const I2C_DEFAULT = { avr: [12, 13], esp32: [21, 22], esp8266: [4, 5], rp2040: [4, 5], nanorp2040: [18, 19] };
 
     // Arduino pin nets + rails
     this.ardNets = {}; this.rails = [];
@@ -186,7 +206,7 @@ export class Simulator {
       }
     }
     // default I2C pins of the board (Wire.begin(sda, scl) can change them on ESP32/ESP8266/RP2040)
-    if (this.board.kind === 'avr') this.i2cDefaultPins = ['A4', 'A5'];
+    if (this.board.kind === 'avr') this.i2cDefaultPins = [...this.board.mcu.i2c];
     else { const [sd, sc] = I2C_DEFAULT[this.board.kind]; this.i2cDefaultPins = [this.board.gpioToName[sd], this.board.gpioToName[sc]]; }
     this.i2c.setBus(this.ardNets[this.i2cDefaultPins[0]] ?? -1, this.ardNets[this.i2cDefaultPins[1]] ?? -1);
     this._i2cNames = this.i2cDefaultPins;
@@ -194,13 +214,14 @@ export class Simulator {
     if (anyBoard) {
       const el = els.get(anyBoard.id), power = BY_TAG[anyBoard.type].power || {};
       for (const pin of (el?.pinInfo || []).map((x) => x.name)) {
-        const base = pin.split('.')[0], net = this.circuit.net(anyBoard.id, pin);
+        const base = (/^\d+\.\d+V$/.test(pin) ? pin : pin.split('.')[0]), net = this.circuit.net(anyBoard.id, pin);
         if (base === 'GND' || base === 'AGND') this.rails.push({ net, value: 0, label: `${anyBoard.id} GND`, rail: true });
         else if (power[base]) this.rails.push({ net, value: power[base] / 5, label: `${anyBoard.id} ${base}`, rail: true });
       }
     }
 
     // behaviours
+    this._ow = null; this._air = null; this._ir = null; this.btModules = []; this._hostSvc = null;
     this.behaviors = [];
     for (const p of model.parts) {
       const factory = BEHAVIORS[p.type];
@@ -219,6 +240,15 @@ export class Simulator {
       this.behaviors.push(b);
     }
     for (const b of this.behaviors) b.attach?.();
+    this.fine = this.behaviors.some((b) => b.fine);
+    this.finePins = new Set(this.behaviors.flatMap((b) => b.finePins?.() || []));   // pins whose every edge must be re-solved (1-Wire, TM1637, HX711 lines)
+    this.logicNets = new Set(this.behaviors.flatMap((b) => b.logicPins?.() || []));
+    // ATtiny85: Serial is a software UART on PB0, Wire runs on the USI -> decode both at pin level
+    this.pinI2C = null;
+    if (this.boardPart && this.board.kind === 'avr' && this.board.mcu?.softSerialTx) {
+      softSerialMonitor(this, this.board.mcu.softSerialTx, (b) => this.emit('serial', b));
+      attachPinI2C(this, ...this.board.mcu.i2c);
+    }   // nets that are digital inputs of driver chips
     this._buildPixelChains();
 
     // pre-flight: floating parts
@@ -304,10 +334,13 @@ export class Simulator {
       const lvl = this.board.driveLevel(name);
       const st = this.board.pins[name];
       if (lvl !== null) {
-        const pwm = st && st.freq > 30 && st.duty !== null;
-        strong.push({ net, value: pwm ? st.duty : lvl, label: `pin ${name} (${lvl ? 'HIGH' : 'LOW'})` });
+        const hw = this.board.isHwPwm ? this.board.isHwPwm(name) : true;
+        const pwm = st && st.freq > 30 && st.duty !== null && (hw || !this.logicNets?.has(net));   // software toggling into a logic input stays digital
+        const vh = this.board.vHigh ?? 1;                       // logic HIGH: 5 V (AVR) or 3.3 V (ESP32 / ESP8266 / RP2040)
+        strong.push(pwm ? { net, value: st.duty * vh, peak: vh, label: `pin ${name} (PWM)` } : { net, value: lvl * vh, label: `pin ${name} (${lvl ? 'HIGH' : 'LOW'})` });
       } else if (this.board.isPullup(name)) pullups.push(net);
     }
+    if (this.pinI2C) strong.push(...this.pinI2C.drivers());
     for (const b of this.behaviors) {
       if (b.drivers1) strong.push(...b.drivers1());
       if (b.pullups) pullups.push(...b.pullups());
@@ -317,9 +350,10 @@ export class Simulator {
     this.coupled = new Set(switches.flat());
     const pass1 = this.circuit.solve({ strong, pullups, switches, weak });
     const d2 = [];
-    for (const b of this.behaviors) if (b.drivers2) d2.push(...b.drivers2(pass1.v));
+    for (const b of this.behaviors) if (b.drivers2) d2.push(...b.drivers2(pass1.v, pass1));
     const fin = this.circuit.solve({ strong: [...strong, ...d2], pullups, switches, weak });
     for (const w of fin.warnings) this.warn('w:' + w.text, w.text);
+    for (const b of this.behaviors) b.settle?.(fin.v);   // behaviours that depend on the final solution (stepper motors)
     return fin;
   }
 
@@ -353,6 +387,7 @@ export class Simulator {
 
   // ------------------------------------------------------------------ control
   async loadWasm(bytes) {
+    this.uart.ports = {};
     await this.board.loadWasm(bytes);
     this.hexText = 'wasm';
     this.warned = new Set();
@@ -360,7 +395,7 @@ export class Simulator {
     this.resolveNow();
   }
 
-  btWrite(text) { this.board.btWrite?.(text); }
+  btWrite(text) { if (this.btModules?.length) this.btModules.forEach((f) => f(text)); else this.board.btWrite?.(text); }   // HC-05 modules take the terminal when present
 
   loadHex(text) {
     this.board.loadHex(text);

@@ -11,6 +11,7 @@ public:
   wl_status_t begin(const String &ssid, const String &pass) { return begin(ssid.c_str(), pass.c_str()); }
   wl_status_t begin() { return begin("SIM-WiFi", ""); }
   wl_status_t status();
+  const char *firmwareVersion() { return "1.5.0"; }   // WiFiNINA
   bool isConnected() { return status() == WL_CONNECTED; }
   bool mode(wifi_mode_t m) { _mode = m; return true; }
   wifi_mode_t getMode() { return _mode; }
