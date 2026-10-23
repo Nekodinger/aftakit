@@ -26,7 +26,7 @@ with sync_playwright() as p:
     pg.screenshot(path=f"{SHOT}/desktop_design.png")
     # every example: load + run, collect error logs
     exs = pg.evaluate("[...document.querySelectorAll('[data-ex]')].map(b => b.dataset.ex)")
-    ok(len(exs) == 25, f"{len(exs)} examples listed")
+    ok(len(exs) == 32, f"{len(exs)} examples listed")
     bad = []
     for ex in exs:
         pg.evaluate(f"location.hash = '#ex={ex}'")
