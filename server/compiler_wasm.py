@@ -1,0 +1,225 @@
+"""Compile Arduino sketches for ESP32 / ESP8266 / RP2040 boards to WebAssembly for the browser simulator.
+
+The sketch is linked against an Arduino-API runtime (esp32rt/) whose hardware calls are imported from the
+simulator (GPIO, ADC, PWM, I2C devices, DHT, WiFi/HTTP through the browser, Bluetooth terminal...).
+Returns {"wasm": base64|None, "stdout": str, "stderr": str} with errors mapped to sketch.ino line numbers.
+"""
+import base64, glob, hashlib, os, re, shutil, subprocess, tempfile, threading
+from concurrent.futures import ThreadPoolExecutor
+import libmgr
+from libmgr import USER_LIBS
+from compiler import preprocess, _strip
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+RT = os.path.join(HERE, "esp32rt")
+WASI = os.environ.get("WASI_SDK", "/opt/wasi/wasi-sdk-25.0-x86_64-linux")
+WASM_OPT = os.environ.get("WASM_OPT", "/opt/wasi/binaryen-version_123/bin/wasm-opt")
+SRC = os.environ.get("ARDUINO_SRC", os.path.join(HERE, "arduino-src"))
+CACHE = os.environ.get("BUILD_CACHE", os.path.join(HERE, ".cache"))
+CXX = os.path.join(WASI, "bin", "clang++")
+CC = os.path.join(WASI, "bin", "clang")
+SYSROOT = os.path.join(WASI, "share", "wasi-sysroot")
+TIMEOUT = int(os.environ.get("COMPILE_TIMEOUT", "90"))
+BOARDS = {"esp32": ["-DESP32", "-DARDUINO_ARCH_ESP32", "-DARDUINO_ESP32_DEV", "-DSIM_BOARD_ESP32"],
+          "esp8266": ["-DESP8266", "-DARDUINO_ARCH_ESP8266", "-DARDUINO_ESP8266_NODEMCU", "-DSIM_BOARD_ESP8266", "-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "esp32rt", "shim8266")],
+          "rp2040": ["-DARDUINO_ARCH_RP2040", "-DARDUINO_RASPBERRY_PI_PICO", "-DSIM_BOARD_RP2040"]}
+COMMON = ["--target=wasm32-wasip1", "--sysroot=" + SYSROOT, "-O2", "-fno-exceptions", "-fno-rtti", "-D_WASI_EMULATED_SIGNAL",
+          "-DARDUINO=10819", "-Wno-everything", "-ffunction-sections", "-fdata-sections"]
+CXXFLAGS = ["-std=gnu++17", "-fno-threadsafe-statics"] + COMMON
+INC = ["-I" + os.path.join(RT, "core"), "-I" + os.path.join(RT, "shim"), "-I" + os.path.join(RT, "ArduinoJson", "src")]
+# real third-party libraries compiled for the simulator (header -> source dir)
+LIBS = {
+    "LiquidCrystal_I2C.h": os.path.join(SRC, "LiquidCrystal_I2C"),
+    "Adafruit_GFX.h": os.path.join(SRC, "Adafruit-GFX-Library"),
+    "Adafruit_SSD1306.h": os.path.join(SRC, "Adafruit_SSD1306"),
+    "Adafruit_I2CDevice.h": os.path.join(SRC, "Adafruit_BusIO"),
+    "Adafruit_SPIDevice.h": os.path.join(SRC, "Adafruit_BusIO"),
+    "Adafruit_BusIO_Register.h": os.path.join(SRC, "Adafruit_BusIO"),
+    "RTClib.h": os.path.join(SRC, "RTClib"),
+    "LiquidCrystal.h": os.path.join(SRC, "LiquidCrystal"),
+}
+DEPS = {"Adafruit_GFX.h": ["Adafruit_I2CDevice.h"], "Adafruit_SSD1306.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "RTClib.h": ["Adafruit_I2CDevice.h"]}
+ASYNC_IMPORTS = "ard.delay_us,ard.yield_,ard.http,ard.net_open,ard.net_dns"
+_lock = threading.RLock()
+
+
+def _run(cmd, cwd=None):
+    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT)
+    return p.returncode, p.stdout, p.stderr
+
+
+_SIG = None
+
+
+def _rt_sig():
+    """fingerprint of every runtime source/header, so cached objects are rebuilt when the runtime changes"""
+    global _SIG
+    if _SIG is None:
+        h = hashlib.md5()
+        for f in sorted(x for d in ("core", "shim", "shim8266") for x in glob.glob(os.path.join(RT, d, "**"), recursive=True) if os.path.isfile(x)):
+            h.update(f.encode()); h.update(open(f, "rb").read())
+        _SIG = h.hexdigest()[:8]
+    return _SIG
+
+
+def _compile_one(s, o, flags):
+    rc, so, se = _run([CXX if s.endswith((".cpp", ".cc", ".cxx")) else CC, "-c"] + (CXXFLAGS if s.endswith((".cpp", ".cc", ".cxx")) else COMMON) + flags + ["-o", o + ".tmp", s])
+    if rc != 0:
+        raise RuntimeError(se or so)
+    os.replace(o + ".tmp", o)
+
+
+def _objs(srcs, outdir, flags):
+    """compile (in parallel) every source not already in the object cache"""
+    os.makedirs(outdir, exist_ok=True); out, todo = [], []
+    for s in srcs:
+        o = os.path.join(outdir, hashlib.md5((s + " ".join(flags) + _rt_sig() + str(os.path.getmtime(s))).encode()).hexdigest()[:12] + "_" + os.path.basename(s) + ".o")
+        out.append(o)
+        if not os.path.exists(o):
+            todo.append((s, o))
+    if todo:
+        with ThreadPoolExecutor(max_workers=max(1, os.cpu_count() or 1)) as ex:
+            for f in [ex.submit(_compile_one, s, o, flags) for s, o in todo]:
+                f.result()
+    return out
+
+
+def runtime_objs(board):
+    srcs = sorted(glob.glob(os.path.join(RT, "core", "*.cpp")) + glob.glob(os.path.join(RT, "shim", "*.cpp")))
+    return _objs(srcs, os.path.join(CACHE, "wasm_rt_" + board), BOARDS[board] + INC)
+
+
+# headers that come from the simulator runtime, the C/C++ library, or ESP-IDF internals we do not emulate
+_SYS_DIRS = None
+def _system_header(h):
+    global _SYS_DIRS
+    if _SYS_DIRS is None:
+        _SYS_DIRS = [os.path.join(RT, "core"), os.path.join(RT, "shim"), os.path.join(RT, "shim8266"), os.path.join(RT, "ArduinoJson", "src"),
+                     os.path.join(SYSROOT, "include", "wasm32-wasip1"), os.path.join(SYSROOT, "include")] + glob.glob(os.path.join(WASI, "lib", "clang", "*", "include"))
+    return any(os.path.exists(os.path.join(d, h)) for d in _SYS_DIRS)
+_NO_INDEX = re.compile(r"^(freertos/|esp_|driver/|soc/|hal/|rom/|sdkconfig|avr/|util/|lwip/|mbedtls/|nvs|sys/|Arduino\.h$|pins_arduino|.*/)")
+
+
+class MissingHeader(Exception):
+    pass
+
+
+_MISSING = re.compile(r"fatal error: '([^']+)' file not found")
+
+
+def _find_lib(h, board, chosen, notes):
+    """library that provides header h, or None (system / unsupported)"""
+    if h in LIBS:
+        return libmgr.describe(LIBS[h])
+    if _NO_INDEX.match(h):
+        return None
+    try:
+        lib = libmgr.index_lib(h, board)
+    except Exception as e:
+        notes.append("library untuk <%s> gagal diunduh: %s" % (h, e)); return None
+    if lib:
+        notes.append("Library Manager: %s %s untuk <%s>" % (lib["name"], lib.get("version", ""), h))
+    return lib
+
+
+def resolve_libs(sketch_cpp, board, user_shas=()):
+    """Like arduino-cli: preprocess the sketch; for every '#include' that is not found, add the library that
+    provides it and try again. Returns (libraries, notes)."""
+    chosen, notes, tried = [], [], set()
+    for sha in user_shas:
+        chosen.append(libmgr.user_lib(sha))
+    for _ in range(40):
+        incs = list(INC) + ["-I" + d for l in chosen for d in l["inc"]]
+        rc, so, se = _run([CXX, "-E", "-o", os.devnull] + CXXFLAGS + BOARDS[board] + incs + [sketch_cpp])
+        m = _MISSING.search(se or "")
+        if rc == 0 or not m:
+            break
+        h = m.group(1)
+        if h in tried:
+            break
+        tried.add(h)
+        lib = _find_lib(h, board, chosen, notes)
+        if not lib or any(l["root"] == lib["root"] for l in chosen):
+            break
+        chosen.append(lib)
+    return chosen, notes
+
+
+def compile_sketch_wasm(sketch, board="esp32", user_libs=()):
+    if board not in BOARDS:
+        return {"wasm": None, "stdout": "", "stderr": f"sketch.ino:1:1: error: board '{board}' tidak dikenal"}
+    if not sketch or not sketch.strip():
+        return {"wasm": None, "stdout": "", "stderr": "sketch.ino:1:1: error: sketch is empty"}
+    work = tempfile.mkdtemp(prefix="wsk_")
+    try:
+        body, _ = preprocess(sketch)
+        cpp = os.path.join(work, "sketch.cpp"); open(cpp, "w").write(body)
+        with _lock:
+            rt = runtime_objs(board)
+            try:
+                libs, notes = resolve_libs(cpp, board, user_libs)
+            except FileNotFoundError as e:
+                return {"wasm": None, "stdout": "", "stderr": "sketch.ino:1:1: error: " + str(e), "missing_libs": True}
+            for _ in range(20):      # a library source may itself need another library
+                incs = list(INC) + ["-I" + d for l in libs for d in l["inc"]]
+                lib_o, retry = [], False
+                for l in libs:
+                    key = hashlib.md5((l["root"] + "|" + " ".join(incs)).encode()).hexdigest()[:10]
+                    try:
+                        lib_o += _objs(l["srcs"], os.path.join(CACHE, "wasm_lib_" + board, re.sub(r"\W", "_", l["name"])[:40] + "_" + key), BOARDS[board] + incs)
+                    except RuntimeError as e:
+                        m = _MISSING.search(str(e))
+                        extra = _find_lib(m.group(1), board, libs, notes) if m else None
+                        if extra and not any(x["root"] == extra["root"] for x in libs):
+                            libs.append(extra); retry = True; break
+                        return {"wasm": None, "stdout": "\n".join(notes), "stderr": "Library %s gagal dikompilasi untuk simulator:\n%s" % (l["name"], _fix(str(e), work)[:4000])}
+                if not retry:
+                    break
+        obj = os.path.join(work, "sketch.o")
+        rc, so, se = _run([CXX, "-c"] + CXXFLAGS + BOARDS[board] + incs + ["-o", obj, cpp], cwd=work)
+        if rc != 0:
+            return {"wasm": None, "stdout": "\n".join(notes), "stderr": _fix(se or so, work)}
+        raw = os.path.join(work, "raw.wasm")
+        rc, so, se = _run([CXX] + CXXFLAGS + ["-mexec-model=reactor", "-Wl,--gc-sections", "-Wl,-z,stack-size=262144", "-o", raw, obj] + lib_o + rt, cwd=work)
+        if rc != 0:
+            return {"wasm": None, "stdout": "\n".join(notes), "stderr": _fix(se or so, work)}
+        # a library whose header and source disagree on a function signature links into a trap in WebAssembly
+        mism = sorted(set(re.findall(r"function signature mismatch: (\S+)", se or "")))
+        if mism:
+            rc2, dem, _ = _run([os.path.join(WASI, "bin", "llvm-cxxfilt")] + mism)
+            if rc2 == 0 and dem.strip():
+                mism = [d.split("(")[0] for d in dem.strip().splitlines()]
+        for fn in mism:
+            notes.append("PERINGATAN: deklarasi dan definisi fungsi %s di library tidak cocok (bug library); program akan berhenti bila fungsi ini dipanggil. Perbarui library-nya (mis. ekspor ulang dari Edge Impulse)." % fn)
+        final = os.path.join(work, "sketch.wasm")
+        # --log-execution puts a call to ard.log_execution at every loop header: the host uses it as a watchdog so
+        # a busy loop such as `for(;;);` can be suspended (page stays responsive) instead of freezing the browser.
+        rc, so, se = _run([WASM_OPT, raw, "-O2", "--log-execution", "--asyncify", "--pass-arg=asyncify-imports@" + ASYNC_IMPORTS + ",ard.log_execution", "-O2", "-o", final])
+        if rc != 0:
+            return {"wasm": None, "stdout": "", "stderr": "wasm-opt: " + (se or so)}
+        data = open(final, "rb").read()
+        info = "\n".join(notes + ["Sketch (simulator %s) %d byte WebAssembly." % (board.upper(), len(data))])
+        return {"wasm": base64.b64encode(data).decode(), "stdout": info, "stderr": ""}
+    except subprocess.TimeoutExpired:
+        return {"wasm": None, "stdout": "", "stderr": "Compilation timed out"}
+    except RuntimeError as e:
+        return {"wasm": None, "stdout": "", "stderr": "Runtime/library build error: " + str(e)[:3000]}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _fix(text, work):
+    text = text.replace(work + "/", "")
+    text = re.sub(r"[^\s:]*/sketch\.cpp", "sketch.ino", text)
+    text = text.replace(RT + "/core/", "<Arduino>/").replace(RT + "/shim/", "<Arduino>/").replace(SRC + "/", "<libraries>/")
+    text = text.replace(libmgr.LIB_DIR + "/", "<libraries>/").replace(libmgr.ULIB_DIR + "/", "<library-anda>/")
+    text = re.sub(r"fatal error: '([^']+)' file not found", r"fatal error: '\1' file not found (library tidak ditemukan di Arduino Library Manager / belum didukung simulator)", text)
+    # linker: undefined symbols -> friendly message
+    text = re.sub(r"wasm-ld: error: [^:]*: undefined symbol: (\S+)", r"sketch.ino:1:1: error: fungsi/variabel '\1' tidak tersedia di simulator (library belum didukung)", text)
+    return text.strip()
+
+
+if __name__ == "__main__":
+    import sys, json
+    r = compile_sketch_wasm(open(sys.argv[1]).read(), sys.argv[2] if len(sys.argv) > 2 else "esp32")
+    print(json.dumps({k: (v if k != "wasm" else len(v or "")) for k, v in r.items()}, indent=1))
