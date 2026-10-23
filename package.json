@@ -1,0 +1,22 @@
+{
+  "name": "avr-circuit-sim",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser circuit + Arduino simulator (Wokwi elements + avr8js)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "examples": "node scripts/build_examples.mjs",
+    "test:core": "node scripts/test_core.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.118.0",
+    "@wokwi/elements": "1.9.2",
+    "avr8js": "0.21.1"
+  },
+  "devDependencies": {
+    "vite": "6.4.5"
+  }
+}

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simulator Rangkaian Arduino</title>
+  <meta name="description" content="Simulator rangkaian & kode Arduino di browser: komponen Wokwi, emulator AVR (ATmega328P), kompilasi sketch asli, bagikan lewat tautan." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e7c86'/%3E%3Cpath d='M9 11h14M9 16h14M9 21h14' stroke='%23fff' stroke-width='2.4' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='11' r='2' fill='%23fff'/%3E%3Ccircle cx='23' cy='16' r='2' fill='%23fff'/%3E%3Ccircle cx='9' cy='21' r='2' fill='%23fff'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0e7c86"/><path d="M9 11h14M9 16h14M9 21h14" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="9" cy="11" r="2" fill="#fff"/><circle cx="23" cy="16" r="2" fill="#fff"/><circle cx="9" cy="21" r="2" fill="#fff"/></svg>
+        <div class="brand-text"><b>Simulator Arduino</b><span>ATmega328P · Wokwi elements · avr8js</span></div>
+      </div>
+      <input id="projectTitle" class="title-input" value="Proyek tanpa judul" maxlength="80" aria-label="Judul proyek" />
+      <div class="actions">
+        <button id="btnRun" class="btn primary" title="Kompilasi lalu jalankan (Ctrl+Enter)"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg><span>Jalankan</span></button>
+        <button id="btnStop" class="btn danger" disabled title="Hentikan simulasi"><svg viewBox="0 0 16 16" width="14" height="14"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/></svg><span>Stop</span></button>
+        <button id="btnReset" class="btn" title="Mulai ulang program dari awal"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Reset</span></button>
+        <span class="sep"></span>
+        <button id="btnCompile" class="btn" title="Kompilasi saja, tanpa menjalankan"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M5.5 4 2 8l3.5 4M10.5 4 14 8l-3.5 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Kompilasi</span></button>
+        <div class="menu" id="menuExamples"><button class="btn" aria-haspopup="true"><span>Contoh</span><svg viewBox="0 0 16 16" width="12" height="12"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button><div class="menu-pop" id="examplesList"></div></div>
+        <div class="menu" id="menuFile"><button class="btn" aria-haspopup="true"><span>Berkas</span><svg viewBox="0 0 16 16" width="12" height="12"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+          <div class="menu-pop">
+            <button data-act="new">Proyek baru</button>
+            <button data-act="export-json">Unduh proyek (.json)</button>
+            <button data-act="import-json">Buka proyek (.json)…</button>
+            <button data-act="export-ino">Unduh kode (.ino)</button>
+            <button data-act="export-hex">Unduh hasil kompilasi (.hex)</button>
+            <button data-act="import-hex">Jalankan berkas .hex…</button>
+            <hr /><button data-act="settings">Pengaturan kompilator…</button>
+          </div></div>
+        <button id="btnShare" class="btn accent" title="Simpan ke database dan dapatkan tautan"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2m0 0L5 5m3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Bagikan</span></button>
+      </div>
+    </header>
+
+    <main id="workspace">
+      <aside id="palette" aria-label="Komponen">
+        <div class="pane-head"><span>Komponen</span><span class="muted" id="partCount"></span></div>
+        <input id="partSearch" type="search" placeholder="Cari komponen…" autocomplete="off" />
+        <div id="partList"></div>
+      </aside>
+
+      <section id="stage">
+        <div id="viewport" tabindex="0" aria-label="Kanvas rangkaian">
+          <div id="world"><svg id="wires" width="6000" height="6000"></svg><div id="parts"></div><div id="pinLayer"></div></div>
+          <div id="emptyHint"><b>Kanvas kosong</b><span>Pilih <em>Contoh</em> di atas, atau klik komponen di panel kiri untuk menambahkannya.</span></div>
+          <div id="stageHud">
+            <div class="hud-group"><button id="zoomOut" title="Perkecil">−</button><span id="zoomLabel">100%</span><button id="zoomIn" title="Perbesar">+</button><button id="zoomFit" title="Sesuaikan ke layar">⤢</button></div>
+            <div class="hud-group" id="simStatus"><span class="dot" id="simDot"></span><span id="simText">Berhenti</span></div>
+          </div>
+          <div id="wireHint" hidden>Klik pin tujuan untuk menyelesaikan kabel · Esc untuk batal</div>
+        </div>
+        <section id="logPanel">
+          <div class="pane-head tabs">
+            <button class="tab on" data-tab="log">Log <span class="badge" id="logBadge" hidden>0</span></button>
+            <button class="tab" data-tab="build">Hasil kompilasi</button>
+            <span class="grow"></span>
+            <button class="mini" id="logClear" title="Bersihkan log">Bersihkan</button>
+          </div>
+          <div id="logList" class="scroll"></div>
+          <pre id="buildOut" class="scroll" hidden></pre>
+        </section>
+      </section>
+
+      <aside id="side">
+        <div class="pane-head tabs">
+          <button class="tab on" data-side="code">Kode</button>
+          <button class="tab" data-side="serial">Serial <span class="badge dot" id="serialBadge" hidden></span></button>
+          <button class="tab" data-side="props">Properti</button>
+        </div>
+        <div id="sideCode" class="side-pane">
+          <div id="editor">
+            <div id="gutter" aria-hidden="true"></div>
+            <div id="editorBody"><pre id="hl" aria-hidden="true"></pre><textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off" aria-label="Editor kode Arduino"></textarea></div>
+          </div>
+          <div id="editorStatus"><span id="cursorPos">Baris 1, Kolom 1</span><span id="compilerState" class="muted"></span></div>
+        </div>
+        <div id="sideSerial" class="side-pane" hidden>
+          <pre id="serialOut" class="scroll" aria-live="off"></pre>
+          <form id="serialForm"><input id="serialIn" placeholder="Kirim ke Serial (Enter)" autocomplete="off" /><select id="serialEol" aria-label="Akhiran baris"><option value="">Tanpa akhiran</option><option value="\n" selected>Newline</option><option value="\r\n">CR + LF</option></select><button class="btn" type="submit">Kirim</button><button class="btn" type="button" id="serialClear">Hapus</button></form>
+        </div>
+        <div id="sideProps" class="side-pane" hidden><div id="propsBody" class="scroll"></div></div>
+      </aside>
+    </main>
+  </div>
+
+  <dialog id="dlgShare"><form method="dialog"><h3>Bagikan simulasi</h3><p id="shareMsg"></p><div class="copyrow"><input id="shareUrl" readonly /><button type="button" class="btn" id="shareCopy">Salin</button></div><p class="muted small" id="shareNote"></p><menu><button class="btn">Tutup</button></menu></form></dialog>
+  <dialog id="dlgSettings"><form method="dialog"><h3>Pengaturan kompilator</h3>
+    <p class="muted small">Sketch dikompilasi di server (avr-gcc + core Arduino). Contoh bawaan yang tidak diubah selalu berjalan tanpa server.</p>
+    <label>URL kompilator utama<input id="setUrl" placeholder="https://…/build" /></label>
+    <p class="muted small" id="setStatus"></p>
+    <menu><button class="btn" value="cancel">Batal</button><button class="btn primary" id="setSave" value="ok">Simpan</button><button class="btn" id="setTest" type="button">Tes koneksi</button></menu></form></dialog>
+  <input type="file" id="fileIn" hidden />
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
