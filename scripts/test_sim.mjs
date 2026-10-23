@@ -133,6 +133,6 @@ const make = (def, conns, sketch, opts = {}) => {
 {
   const sim = new Simulator(); const model = { parts: [{ id: 'led1', type: 'wokwi-led', attrs: {} }], connections: [] };
   const diag = sim.build(model, new Map([['led1', new Stub('wokwi-led', ['A', 'C'])]]));
-  ok(diag.errors.length === 1 && /board/i.test(diag.errors[0]), 'no board -> error: ' + diag.errors[0]);
+  ok(diag.errors.length === 0 && sim.boardPart === null, 'no board -> circuit-only build, no error');
 }
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS'); process.exit(fails ? 1 : 0);

@@ -1,9 +1,16 @@
 // Orchestrator: wires the AVR core, netlist solver, behaviours and the frame loop together.
 import { AvrBoard, PIN_MAP, CLOCK_HZ } from './avr.js';
 import { Circuit } from './circuit.js';
-import { BEHAVIORS } from './behaviors.js';
+import { BEHAVIORS as B1 } from './behaviors.js';
+import { BEHAVIORS2 } from './behaviors2.js';
+import { I2C_BEHAVIORS } from './i2cParts.js';
+import { I2CBus } from './i2c.js';
 import { Audio } from './audio.js';
 import { BY_TAG } from '../catalog.js';
+
+const BEHAVIORS = { ...B1, ...BEHAVIORS2, ...I2C_BEHAVIORS, 'mod-jsn-sr04t': B1['wokwi-hc-sr04'] };
+// firmware that just idles (rjmp .-2): used when the circuit has no runnable microcontroller
+export const IDLE_HEX = ':02000000FFCF30\n:00000001FF\n';
 
 export class Simulator {
   constructor() {
@@ -17,6 +24,9 @@ export class Simulator {
     this.warned = new Set();
     this.last = null;
     this.circuit = null;
+    this.i2c = new I2CBus(this);
+    this.board.onInit = () => this.i2c.attach(this.board.twi);
+    this.i2c.attach(this.board.twi);
     this.board.serialListeners.push(Object.assign((b) => this.emit('serial', b), { keep: true }));
     // A pin driven by firmware that shares a net with a closed switch (keypad matrix, button chains) must
     // be re-solved immediately: sketches write a column and read the rows within a few cycles.
@@ -41,7 +51,10 @@ export class Simulator {
 
   log(level, text) { this.emit('log', { level, text, t: this.board.cpu.cycles / CLOCK_HZ }); }
   info(text) { this.log('info', text); }
-  warn(key, text) { if (this.warned.has(key)) return; this.warned.add(key); this.log('warn', text); }
+  warn(key, text) {
+    // without a runnable board, "not connected to an Arduino pin" hints are noise (design / circuit-only mode)
+    if (!this.boardPart && /pin Arduino|ke Arduino|langsung ke pin/.test(text)) return;
+    if (this.warned.has(key)) return; this.warned.add(key); this.log('warn', text); }
   error(text) { this.log('error', text); }
   after(cycles, fn) { this.board.cpu.addClockEvent(fn, cycles); }
   circuitStrong(net) { return this.last ? this.last.strong(net) : false; }
@@ -61,14 +74,10 @@ export class Simulator {
     const pf = (text) => { diag.warnings.push(text); this.warn('pf:' + text, text); };
     this.circuit.issues.forEach(pf);
 
-    const boardPart = model.parts.find((p) => BY_TAG[p.type]?.board);
-    this.boardPart = boardPart || null;
-    if (!boardPart) {
-      const anyBoard = model.parts.find((p) => /arduino|esp32|rp2040|franzininho/.test(p.type));
-      diag.errors.push(anyBoard
-        ? `Board "${BY_TAG[anyBoard.type]?.name || anyBoard.type}" hanya tampilan dan belum bisa disimulasikan. Gunakan Arduino Uno atau Nano (ATmega328P).`
-        : 'Belum ada board. Tambahkan Arduino Uno atau Nano dari panel komponen.');
-    }
+    const anyBoard = model.parts.find((p) => BY_TAG[p.type]?.board);
+    const boardPart = anyBoard && BY_TAG[anyBoard.type].sim === 'full' ? anyBoard : null;
+    this.boardPart = boardPart; this.designBoard = boardPart ? null : anyBoard || null;
+    this.i2c.clear();
 
     // Arduino pin nets + rails
     this.ardNets = {}; this.rails = [];
@@ -77,12 +86,14 @@ export class Simulator {
         const n = this.circuit.net(boardPart.id, name);
         if (n >= 0) this.ardNets[name] = n;
       }
-      const el = els.get(boardPart.id);
-      for (const pin of el.pinInfo.map((x) => x.name)) {
-        const base = pin.split('.')[0], net = this.circuit.net(boardPart.id, pin);
-        if (base === 'GND') this.rails.push({ net, value: 0, label: 'GND', rail: true });
-        else if (base === '5V') this.rails.push({ net, value: 1, label: '5V', rail: true });
-        else if (base === '3.3V') this.rails.push({ net, value: 0.66, label: '3.3V', rail: true });
+    }
+    // power rails of whichever board is present (runnable or design-only): powers sensors, LEDs, modules
+    if (anyBoard) {
+      const el = els.get(anyBoard.id), power = BY_TAG[anyBoard.type].power || {};
+      for (const pin of (el?.pinInfo || []).map((x) => x.name)) {
+        const base = pin.split('.')[0], net = this.circuit.net(anyBoard.id, pin);
+        if (base === 'GND' || base === 'AGND') this.rails.push({ net, value: 0, label: `${anyBoard.id} GND`, rail: true });
+        else if (power[base]) this.rails.push({ net, value: power[base] / 5, label: `${anyBoard.id} ${base}`, rail: true });
       }
     }
 
@@ -99,7 +110,7 @@ export class Simulator {
         ardPins: (pin) => sim.arduinoPinsOnNet(sim.circuit.net(p.id, pin)),
         listen: (t, e, f) => { t.addEventListener(e, f); listeners.push([t, e, f]); },
       };
-      const b = factory(ctx);
+      const b = factory(ctx); if (!b) continue;
       b._dispose = () => listeners.forEach(([t, e, f]) => t.removeEventListener(e, f));
       b._part = p;
       this.behaviors.push(b);
@@ -109,7 +120,7 @@ export class Simulator {
 
     // pre-flight: floating parts
     for (const p of model.parts) {
-      if (BY_TAG[p.type]?.board) continue;
+      if (BY_TAG[p.type]?.board || BY_TAG[p.type]?.breadboard) continue;
       const el = els.get(p.id);
       const any = (el?.pinInfo || []).some((x) => this.circuit.isWired(p.id, x.name));
       if (!any && BEHAVIORS[p.type]) pf(`${p.id}: belum ada kabel yang terhubung.`);
@@ -241,6 +252,7 @@ export class Simulator {
     this.warned = new Set();
     for (const b of this.behaviors) b.reset?.();
     this.lastFaultCount = 0;
+    this.resolveNow(); // push sensor levels / ADC values into the freshly reset CPU before the first instruction
   }
   get hasProgram() { return !!this.hexText; }
 

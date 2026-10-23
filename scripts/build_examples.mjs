@@ -6,6 +6,7 @@ import { deflateRawSync } from 'node:zlib';
 import { parseHex } from '../src/sim/hex.js';
 const items = {}, chunks = []; let off = 0, bad = 0;
 for (const ex of EXAMPLES) {
+  if (ex.board === 'design') { console.log('skip (design board)', ex.id); continue; }
   const py = `import json,sys; sys.path.insert(0,'server'); from compiler import compile_sketch; r=compile_sketch(sys.stdin.read()); print(json.dumps(r))`;
   const r = JSON.parse(execFileSync('python3', ['-c', py], { input: ex.code, encoding: 'utf8', maxBuffer: 1 << 26 }));
   if (!r.hex) { console.error('FAIL', ex.id, r.stderr || r.error); bad++; continue; }

@@ -51,6 +51,7 @@ export class AvrBoard {
     for (const [pn, port] of Object.entries(this.ports)) {
       port.addListener(() => this._portChanged(pn));
     }
+    this.onInit?.();
   }
 
   // read the level an Arduino pin is *driving*: 1, 0, or null (input / tri-state)
