@@ -55,6 +55,18 @@ else
 fi
 du -sh tc server/arduino-src server/_cache 2>/dev/null
 
+# ---------------------------------------------------------------- 3b. pack for the function bundle (size limit)
+# The function bundle may not exceed ~250 MB unpacked, and tc/ + the warm cache are ~380 MB. They are packed into
+# gzip archives here and unpacked into /tmp on first use by api/compile.py (see _unpack there).
+log "pack"
+rm -rf pack && mkdir -p pack
+tar -czf pack/wasi.tgz -C tc wasi-sdk-25.0-x86_64-linux binaryen
+tar -czf pack/avr.tgz -C tc avr
+tar -czf pack/arduino-src.tgz -C server/arduino-src .
+[ -d server/_cache ] && tar -czf pack/cache.tgz -C server/_cache .
+rm -rf tc server/arduino-src server/_cache
+du -sh pack/* pack
+
 # ---------------------------------------------------------------- 4. web app
 log "vite build"
 npx vite build

@@ -5,7 +5,8 @@
   "functions": {
     "api/compile.py": {
       "maxDuration": 300,
-      "includeFiles": "{tc,server}/**"
+      "includeFiles": "{pack,server}/**",
+      "excludeFiles": "{node_modules/**,dist/**,public/**,src/**,scripts/**,.git/**}"
     },
     "api/net.js": {
       "maxDuration": 300
