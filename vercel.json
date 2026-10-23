@@ -1,2 +1,31 @@
-{ "framework": "vite", "buildCommand": "vite build", "outputDirectory": "dist",
-  "headers": [{ "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] }] }
+{
+  "framework": "vite",
+  "buildCommand": "bash scripts/vercel-build.sh",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/compile.py": {
+      "maxDuration": 300,
+      "includeFiles": "{tc,server}/**"
+    },
+    "api/net.js": {
+      "maxDuration": 300
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/cc/:p*",
+      "destination": "/api/compile?p=:p*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ]
+}

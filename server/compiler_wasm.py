@@ -4,7 +4,7 @@ The sketch is linked against an Arduino-API runtime (esp32rt/) whose hardware ca
 simulator (GPIO, ADC, PWM, I2C devices, DHT, WiFi/HTTP through the browser, Bluetooth terminal...).
 Returns {"wasm": base64|None, "stdout": str, "stderr": str} with errors mapped to sketch.ino line numbers.
 """
-import base64, glob, hashlib, os, re, shutil, subprocess, tempfile, threading
+import base64, glob, hashlib, os, re, shutil, subprocess, tempfile, threading, time
 from concurrent.futures import ThreadPoolExecutor
 import libmgr
 from libmgr import USER_LIBS
@@ -19,7 +19,9 @@ CACHE = os.environ.get("BUILD_CACHE", os.path.join(HERE, ".cache"))
 CXX = os.path.join(WASI, "bin", "clang++")
 CC = os.path.join(WASI, "bin", "clang")
 SYSROOT = os.path.join(WASI, "share", "wasi-sysroot")
-TIMEOUT = int(os.environ.get("COMPILE_TIMEOUT", "90"))
+TIMEOUT = int(os.environ.get("COMPILE_TIMEOUT", "300"))
+# parallel clang processes; set COMPILE_JOBS=1 on small (512 MB) free instances
+JOBS = max(1, int(os.environ.get("COMPILE_JOBS", "0")) or (os.cpu_count() or 1))
 BOARDS = {"esp32": ["-DESP32", "-DARDUINO_ARCH_ESP32", "-DARDUINO_ESP32_DEV", "-DSIM_BOARD_ESP32"],
           "esp8266": ["-DESP8266", "-DARDUINO_ARCH_ESP8266", "-DARDUINO_ESP8266_NODEMCU", "-DSIM_BOARD_ESP8266", "-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "esp32rt", "shim8266")],
           "rp2040": ["-DARDUINO_ARCH_RP2040", "-DARDUINO_RASPBERRY_PI_PICO", "-DSIM_BOARD_RP2040"]}
@@ -57,12 +59,34 @@ def _rt_sig():
     if _SIG is None:
         h = hashlib.md5()
         for f in sorted(x for d in ("core", "shim", "shim8266") for x in glob.glob(os.path.join(RT, d, "**"), recursive=True) if os.path.isfile(x)):
-            h.update(f.encode()); h.update(open(f, "rb").read())
+            h.update(os.path.relpath(f, RT).encode()); h.update(open(f, "rb").read())
         _SIG = h.hexdigest()[:8]
     return _SIG
 
 
+def _stable(text):
+    """cache keys must not depend on where the toolchain / sources live (build machine vs. serverless runtime)"""
+    for root, tok in ((RT, "<rt>"), (SRC, "<src>"), (WASI, "<wasi>"), (HERE, "<here>")):
+        text = text.replace(root, tok)
+    return text
+
+
+def _fsig(path):
+    """content fingerprint of a source file (mtimes change when files are copied)"""
+    with open(path, "rb") as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+
+class Pending(Exception):
+    """the time budget of this request ran out; finished objects stay cached, the client asks again"""
+
+
+DEADLINE = None   # set per request by a serverless host (seconds since epoch)
+
+
 def _compile_one(s, o, flags):
+    if DEADLINE and time.time() > DEADLINE:
+        raise Pending()
     rc, so, se = _run([CXX if s.endswith((".cpp", ".cc", ".cxx")) else CC, "-c"] + (CXXFLAGS if s.endswith((".cpp", ".cc", ".cxx")) else COMMON) + flags + ["-o", o + ".tmp", s])
     if rc != 0:
         raise RuntimeError(se or so)
@@ -73,12 +97,12 @@ def _objs(srcs, outdir, flags):
     """compile (in parallel) every source not already in the object cache"""
     os.makedirs(outdir, exist_ok=True); out, todo = [], []
     for s in srcs:
-        o = os.path.join(outdir, hashlib.md5((s + " ".join(flags) + _rt_sig() + str(os.path.getmtime(s))).encode()).hexdigest()[:12] + "_" + os.path.basename(s) + ".o")
+        o = os.path.join(outdir, hashlib.md5((_stable(" ".join(flags)) + _rt_sig() + _fsig(s)).encode()).hexdigest()[:12] + "_" + os.path.basename(s) + ".o")
         out.append(o)
         if not os.path.exists(o):
             todo.append((s, o))
     if todo:
-        with ThreadPoolExecutor(max_workers=max(1, os.cpu_count() or 1)) as ex:
+        with ThreadPoolExecutor(max_workers=JOBS) as ex:
             for f in [ex.submit(_compile_one, s, o, flags) for s, o in todo]:
                 f.result()
     return out
@@ -160,21 +184,29 @@ def compile_sketch_wasm(sketch, board="esp32", user_libs=()):
                 libs, notes = resolve_libs(cpp, board, user_libs)
             except FileNotFoundError as e:
                 return {"wasm": None, "stdout": "", "stderr": "sketch.ino:1:1: error: " + str(e), "missing_libs": True}
-            for _ in range(20):      # a library source may itself need another library
-                incs = list(INC) + ["-I" + d for l in libs for d in l["inc"]]
-                lib_o, retry = [], False
-                for l in libs:
-                    key = hashlib.md5((l["root"] + "|" + " ".join(incs)).encode()).hexdigest()[:10]
+            # each library is compiled against its OWN include closure (its dirs + libraries it needs), so the
+            # object cache is shared by every sketch that uses it, whatever other libraries the sketch includes
+            lib_o, i = [], 0
+            while i < len(libs):
+                l = libs[i]; i += 1
+                deps = []
+                for _ in range(20):
+                    lincs = list(INC) + ["-I" + d for d in l["inc"]] + ["-I" + d for dl in deps for d in dl["inc"]]
+                    key = hashlib.md5(_stable(l["root"] + "|" + " ".join(lincs)).encode()).hexdigest()[:10]
                     try:
-                        lib_o += _objs(l["srcs"], os.path.join(CACHE, "wasm_lib_" + board, re.sub(r"\W", "_", l["name"])[:40] + "_" + key), BOARDS[board] + incs)
+                        lib_o += _objs(l["srcs"], os.path.join(CACHE, "wasm_lib_" + board, re.sub(r"\W", "_", l["name"])[:40] + "_" + key), BOARDS[board] + lincs)
+                        break
                     except RuntimeError as e:
-                        m = _MISSING.search(str(e))
-                        extra = _find_lib(m.group(1), board, libs, notes) if m else None
-                        if extra and not any(x["root"] == extra["root"] for x in libs):
-                            libs.append(extra); retry = True; break
-                        return {"wasm": None, "stdout": "\n".join(notes), "stderr": "Library %s gagal dikompilasi untuk simulator:\n%s" % (l["name"], _fix(str(e), work)[:4000])}
-                if not retry:
-                    break
+                        m = _MISSING.search(str(e)); h = m.group(1) if m else None
+                        prov = None
+                        if h:
+                            prov = next((x for x in libs if h in x["headers"] or os.path.basename(h) in {os.path.basename(y) for y in x["headers"]}), None) or _find_lib(h, board, libs, notes)
+                        if not prov or any(d["root"] == prov["root"] for d in deps) or prov["root"] == l["root"]:
+                            return {"wasm": None, "stdout": "\n".join(notes), "stderr": "Library %s gagal dikompilasi untuk simulator:\n%s" % (l["name"], _fix(str(e), work)[:4000])}
+                        deps.append(prov)
+                        if not any(x["root"] == prov["root"] for x in libs):
+                            libs.append(prov)
+            incs = list(INC) + ["-I" + d for l in libs for d in l["inc"]]
         obj = os.path.join(work, "sketch.o")
         rc, so, se = _run([CXX, "-c"] + CXXFLAGS + BOARDS[board] + incs + ["-o", obj, cpp], cwd=work)
         if rc != 0:
@@ -200,6 +232,8 @@ def compile_sketch_wasm(sketch, board="esp32", user_libs=()):
         data = open(final, "rb").read()
         info = "\n".join(notes + ["Sketch (simulator %s) %d byte WebAssembly." % (board.upper(), len(data))])
         return {"wasm": base64.b64encode(data).decode(), "stdout": info, "stderr": ""}
+    except Pending:
+        return {"wasm": None, "pending": True, "stdout": "Mengompilasi library besar (dilanjutkan)…", "stderr": ""}
     except subprocess.TimeoutExpired:
         return {"wasm": None, "stdout": "", "stderr": "Compilation timed out"}
     except RuntimeError as e:

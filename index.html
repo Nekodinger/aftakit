@@ -238,8 +238,8 @@
 
   <dialog id="dlgShare"><form method="dialog"><h3>Bagikan simulasi</h3><p id="shareMsg"></p><div class="copyrow"><input id="shareUrl" readonly /><button type="button" class="btn" id="shareCopy">Salin</button></div><p class="muted small" id="shareNote"></p><menu><button class="btn">Tutup</button></menu></form></dialog>
   <dialog id="dlgSettings"><form method="dialog"><h3>Pengaturan kompilator</h3>
-    <p class="muted small">Kode sendiri dikompilasi di server: Uno/Nano dengan avr-gcc, ESP32/ESP8266/Pico ke WebAssembly (clang). Contoh bawaan yang tidak diubah selalu berjalan tanpa server. Server gratis: Hugging Face Space (Docker) dari folder <code>server/</code>.</p>
-    <label>URL kompilator<input id="setUrl" placeholder="https://nama-space.hf.space" /></label>
+    <p class="muted small">Kode sendiri dikompilasi di server: Uno/Nano dengan avr-gcc, ESP32/ESP8266/Pico ke WebAssembly (clang). Contoh bawaan yang tidak diubah selalu berjalan tanpa server. Kompilator, Library Manager, dan gateway IoT sudah berjalan di situs ini (Vercel); URL lain hanya untuk server sendiri dari folder <code>server/</code>.</p>
+    <label>URL kompilator <span class="muted small">(kosongkan = kompilator bawaan situs ini)</span><input id="setUrl" placeholder="kosong = bawaan (/api/cc)" /></label>
     <p class="muted small" id="setStatus"></p>
     <menu><button class="btn" value="cancel">Batal</button><button class="btn" id="setTest" type="button">Tes koneksi</button><button class="btn primary" id="setSave" value="ok">Simpan</button></menu></form></dialog>
   <dialog id="dlgHelp"><form method="dialog"><h3 id="helpTitle">Cara pakai</h3><div id="helpBody" class="help"></div><menu><button class="btn primary">Mengerti</button></menu></form></dialog>

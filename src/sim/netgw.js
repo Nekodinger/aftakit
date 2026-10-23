@@ -10,13 +10,14 @@ export class NetGateway {
   _open() {
     if (this.ready) return this.ready;
     if (!this.url) return (this.ready = Promise.reject(new Error('gateway jaringan belum diatur')));
+    if (Date.now() < (this.retryAt || 0)) return Promise.reject(new Error('gateway belum bisa dihubungi, mencoba lagi sebentar lagi'));
     this.ready = new Promise((resolve, reject) => {
       let ws;
       try { ws = new WebSocket(this.url); } catch (e) { reject(e); return; }
       ws.binaryType = 'arraybuffer';
       const t = setTimeout(() => { reject(new Error('gateway tidak menjawab (server mungkin sedang bangun, coba lagi)')); try { ws.close(); } catch { /* ignore */ } }, 20000);
-      ws.onopen = () => { clearTimeout(t); this.ws = ws; resolve(ws); };
-      ws.onerror = () => { clearTimeout(t); reject(new Error('tidak bisa tersambung ke gateway')); };
+      ws.onopen = () => { clearTimeout(t); this.ws = ws; this.backoff = 0; resolve(ws); };
+      ws.onerror = () => { clearTimeout(t); this.retryAt = Date.now() + (this.backoff = Math.min(30000, (this.backoff || 2500) * 2)); reject(new Error('tidak bisa tersambung ke gateway')); };
       ws.onclose = () => {
         clearTimeout(t); this.ws = null; this.ready = null;
         for (const s of this.socks.values()) s.closed = true;

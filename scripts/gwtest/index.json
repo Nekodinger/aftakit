@@ -1,7 +1,8 @@
 {"libraries": [
- {"name": "Blynk", "version": "1.4.0", "url": "http://invalid.local/blynk.zip", "repository": "https://github.com/blynkkk/blynk-library.git", "architectures": ["*"],
-  "providesIncludes": ["Blynk.h", "BlynkSimpleEsp32.h", "BlynkSimpleEsp32_SSL.h", "BlynkSimpleEsp8266.h", "BlynkSimpleWifi.h", "BlynkMultiClient.h", "BlynkEdgent.h"]},
+ {"name": "Blynk", "version": "1.4.0", "url": "http://invalid.local/blynk.zip", "repository": "https://github.com/blynkkk/blynk-library.git", "architectures": ["*"], "providesIncludes": ["Blynk.h"]},
+ {"name": "Blynk", "version": "1.3.2", "url": "http://invalid.local/blynk-old.zip", "repository": "https://github.com/blynkkk/blynk-library.git", "architectures": ["*"], "providesIncludes": ["Blynk.h"]},
+ {"name": "BlynkGO", "version": "1.0.0", "url": "http://invalid.local/x.zip", "repository": "https://github.com/invalid/none.git", "architectures": ["esp32"], "providesIncludes": ["BlynkGO.h"]},
  {"name": "PubSubClient", "version": "2.8", "url": "http://invalid.local/p.zip", "repository": "https://github.com/knolleary/pubsubclient.git", "architectures": ["*"], "providesIncludes": ["PubSubClient.h"]},
  {"name": "UniversalTelegramBot", "version": "1.3.0", "url": "http://invalid.local/t.zip", "repository": "https://github.com/witnessmenow/Universal-Arduino-Telegram-Bot.git", "architectures": ["*"], "providesIncludes": ["UniversalTelegramBot.h"]},
- {"name": "ThingSpeak", "version": "2.1.1", "url": "http://invalid.local/ts.zip", "repository": "https://github.com/mathworks/thingspeak-arduino.git", "architectures": ["*"], "providesIncludes": ["ThingSpeak.h"]}
+ {"name": "ThingSpeak", "version": "2.1.1", "url": "http://invalid.local/ts.zip", "repository": "https://github.com/mathworks/thingspeak-arduino.git", "architectures": ["avr", "esp8266", "esp32"], "providesIncludes": ["ThingSpeak.h"]}
 ]}

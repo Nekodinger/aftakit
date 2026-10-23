@@ -81,7 +81,7 @@ def _build_dir_objs(srcs, outdir, extra_inc):
     os.makedirs(outdir, exist_ok=True)
     objs = []
     for s in srcs:
-        o = os.path.join(outdir, hashlib.md5(s.encode()).hexdigest()[:10] + "_" + os.path.basename(s) + ".o")
+        o = os.path.join(outdir, hashlib.md5(os.path.relpath(s, SRC).encode()).hexdigest()[:10] + "_" + os.path.basename(s) + ".o")  # stable across machines
         if not os.path.exists(o):
             _compile_obj(s, o, extra_inc)
         objs.append(o)

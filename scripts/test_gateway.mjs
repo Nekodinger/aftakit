@@ -28,7 +28,7 @@ print(json.dumps(compile_sketch_wasm(open('/tmp/_g.ino').read(), 'esp32')))`], {
 const ESP = 'VIN GND.2 D13 D12 D14 D27 D26 D25 D33 D32 D35 D34 VN VP EN 3V3 GND.1 D15 D2 D4 RX2 TX2 D5 D18 D19 D21 RX0 TX0 D22 D23'.split(' ');
 class Stub { constructor(t, p) { this.tagName = t.toUpperCase(); this.pinInfo = p.map((name) => ({ name })); } addEventListener() {} removeEventListener() {} }
 async function make(sketch) {
-  const sim = new Simulator(); sim.gatewayUrl = `ws://127.0.0.1:${GW_PORT}/net`;
+  const sim = new Simulator(); sim.gatewayUrl = process.env.GW_URL || `ws://127.0.0.1:${GW_PORT}/net`;
   sim.logs = []; sim.on('log', (l) => sim.logs.push(l.level + ': ' + l.text)); sim.serial = ''; sim.on('serial', (b) => (sim.serial += String.fromCharCode(b)));
   sim.build({ parts: [{ id: 'esp', type: 'wokwi-esp32-devkit-v1', attrs: {} }], connections: [] }, new Map([['esp', new Stub('wokwi-esp32-devkit-v1', ESP)]]));
   await sim.loadWasm(compile(sketch)); return sim;

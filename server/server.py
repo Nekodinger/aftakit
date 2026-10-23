@@ -29,6 +29,9 @@ MAX_WS_PER_IP = 6
 IDLE_S = 180
 MAX_BYTES = 20 << 20     # per tab (both directions)
 ws_per_ip = collections.Counter()
+# compiles running at the same time (a 512 MB free instance can only afford one clang at a time)
+from concurrent.futures import ThreadPoolExecutor
+COMPILE_POOL = ThreadPoolExecutor(max_workers=max(1, int(os.environ.get("COMPILE_CONCURRENCY", "2"))))
 
 
 def _cors(req, resp):
@@ -81,9 +84,9 @@ async def build(req):
     loop = asyncio.get_running_loop()
     if wasm:
         libs = [str(x) for x in (data.get("libs") or []) if isinstance(x, str)][:8]
-        fut = loop.run_in_executor(None, lambda: compile_sketch_wasm(str(data.get("sketch", "")), str(data.get("board", "esp32")), libs))
+        fut = loop.run_in_executor(COMPILE_POOL, lambda: compile_sketch_wasm(str(data.get("sketch", "")), str(data.get("board", "esp32")), libs))
     else:
-        fut = loop.run_in_executor(None, lambda: compile_sketch(str(data.get("sketch", ""))))
+        fut = loop.run_in_executor(COMPILE_POOL, lambda: compile_sketch(str(data.get("sketch", ""))))
     try:
         # big libraries (Edge Impulse, TFLite) take minutes the first time: answer with a job id and let the
         # browser poll /job/<id> instead of hitting proxy timeouts

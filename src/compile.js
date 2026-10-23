@@ -8,7 +8,10 @@ export function loadSettings() {
   try { return { url: '', ...JSON.parse(localStorage.getItem(LS) || '{}') }; } catch { return { url: '' }; }
 }
 export function saveSettings(s) { try { localStorage.setItem(LS, JSON.stringify(s)); } catch { /* storage blocked */ } }
-export function compileBase() { return (loadSettings().url || CONFIG.compileUrl || '').trim().replace(/\/+$/, '').replace(/\/build(-wasm)?$/, ''); }
+// Default: the compile service built into this site (Vercel Function at /api/cc). A custom server URL can be set in
+// Berkas -> Pengaturan (e.g. a self-hosted Docker server from the server/ folder).
+export const BUILTIN_BASE = '/api/cc';
+export function compileBase() { return (loadSettings().url || CONFIG.compileUrl || BUILTIN_BASE).trim().replace(/\/+$/, '').replace(/\/build(-wasm)?$/, ''); }
 export function compileEndpoint(board = 'avr') { const b = compileBase(); return b ? b + (board === 'avr' ? '/build' : '/build-wasm') : ''; }
 
 const cache = new Map();
@@ -32,6 +35,21 @@ const b64bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
  * @returns {Promise<{ok:boolean, hex?:string, wasm?:Uint8Array, stdout?:string, stderr?:string, diagnostics:any[], source:string, error?:string}>} */
 // make sure the server has every user library (.zip) of the project; uploads only the missing ones
 async function ensureLibs(base, libs, getLib, onProgress) {
+  // built-in (Vercel) service: libraries live in Supabase Storage as <sha256>.zip, the function fetches them by hash
+  if (CONFIG.supabaseUrl && CONFIG.supabaseKey && base === BUILTIN_BASE) {
+    const sb = CONFIG.supabaseUrl.replace(/\/+$/, '');
+    for (const l of libs) {
+      const h = await fetch(`${sb}/storage/v1/object/public/libs/${l.sha}.zip`, { method: 'HEAD' }).catch(() => null);
+      if (h && h.ok) continue;
+      const blob = await getLib(l.sha);
+      if (!blob) throw new Error(`File library "${l.name}" tidak ada di perangkat ini. Unggah ulang .zip-nya di panel Library.`);
+      if (blob.size > 50 * 1048576) throw new Error(`Library ${l.name} lebih dari 50 MB (batas penyimpanan gratis).`);
+      onProgress?.(`Mengunggah library ${l.name} (${(blob.size / 1048576).toFixed(1)} MB)…`);
+      const r = await fetch(`${sb}/storage/v1/object/libs/${l.sha}.zip`, { method: 'POST', body: blob, headers: { apikey: CONFIG.supabaseKey, Authorization: 'Bearer ' + CONFIG.supabaseKey, 'Content-Type': 'application/zip', 'x-upsert': 'false' } });
+      if (!r.ok && r.status !== 409) { let m = ''; try { m = (await r.json()).message; } catch { /* not json */ } if (!/exists|Duplicate/i.test(m)) throw new Error(`Gagal mengunggah library ${l.name}: ${m || 'HTTP ' + r.status}`); }
+    }
+    return;
+  }
   for (const l of libs) {
     const h = await fetch(`${base}/lib/${l.sha}`, { method: 'HEAD' }).catch(() => null);
     if (h && h.ok) continue;
@@ -42,13 +60,16 @@ async function ensureLibs(base, libs, getLib, onProgress) {
     if (!r.ok) { let m = ''; try { m = (await r.json()).error; } catch { /* not json */ } throw new Error(`Gagal mengunggah library ${l.name}: ${m || 'HTTP ' + r.status}`); }
   }
 }
-// long builds (Edge Impulse, TensorFlow Lite) return a job id: poll until it is done
-async function waitJob(base, data, onProgress) {
+// long builds (Edge Impulse, TensorFlow Lite): a self-hosted server returns a job id to poll; the serverless
+// service compiles in slices of ~4 minutes and answers {pending} -> send the same request again to continue
+async function waitJob(base, data, onProgress, again) {
   const t0 = Date.now();
   while (data && data.pending && Date.now() - t0 < 20 * 60000) {
-    onProgress?.(`Mengompilasi library besar… ${Math.round((Date.now() - t0) / 1000)} s (pertama kali bisa 1–3 menit, berikutnya cepat)`);
-    await new Promise((r) => setTimeout(r, 3000));
-    try { const r = await fetch(`${base}/job/${data.job}`); data = await r.json(); } catch { /* retry */ }
+    onProgress?.(`Mengompilasi library besar… ${Math.round((Date.now() - t0) / 1000)} s (pertama kali bisa beberapa menit, berikutnya cepat)`);
+    try {
+      if (data.job) { await new Promise((r) => setTimeout(r, 3000)); data = await (await fetch(`${base}/job/${data.job}`)).json(); }
+      else data = await (await again()).json();
+    } catch { await new Promise((r) => setTimeout(r, 3000)); }
   }
   return data;
 }
@@ -67,19 +88,18 @@ export async function compile(code, { precompiled, board = 'avr', libs = [], get
   const ep = compileEndpoint(board);
   if (ep) {
     let res;
+    const post = () => fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sketch: code, board, libs: libs.map((l) => l.sha) }), signal: AbortSignal.timeout(320000) });
     if (libs.length && board !== 'avr') {
       try { await ensureLibs(compileBase(), libs, getLib, onProgress); } catch (e) { return fail(e.message, 'server'); }
     }
     try {
-      const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 90000);
-      res = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sketch: code, board, libs: libs.map((l) => l.sha) }), signal: ctl.signal });
-      clearTimeout(timer);
+      res = await post();
     } catch (e) {
-      const msg = e.name === 'AbortError' ? 'Server kompilator tidak menjawab dalam 90 detik (mungkin sedang bangun dari tidur — coba lagi).' : `Tidak dapat menghubungi server kompilator (${ep}). Periksa koneksi, atau URL di Berkas → Pengaturan.`;
+      const msg = (e.name === 'AbortError' || e.name === 'TimeoutError') ? 'Server kompilator tidak menjawab dalam 5 menit (mungkin sedang bangun dari tidur — coba lagi).' : `Tidak dapat menghubungi server kompilator (${ep}). Periksa koneksi, atau URL di Berkas → Pengaturan.`;
       return fail(msg, 'network');
     }
     let data = null; try { data = await res.json(); } catch { /* not json */ }
-    if (data?.pending) data = await waitJob(compileBase(), data, onProgress);
+    if (data?.pending) data = await waitJob(compileBase(), data, onProgress, post);
     if (data?.pending) return fail('Kompilasi terlalu lama (lebih dari 20 menit). Coba lagi nanti.', 'server');
     if (res.status === 429) return fail('Terlalu banyak permintaan kompilasi. Tunggu sebentar lalu coba lagi.', 'server');
     if (res.status === 404 && board !== 'avr') return fail(`Server kompilator ini belum mendukung ${BOARD_NAME[board]} (versi lama). Perbarui server dengan folder server/ terbaru.`, 'server');
@@ -95,7 +115,12 @@ export async function compile(code, { precompiled, board = 'avr', libs = [], get
 function fail(message, source) { return { ok: false, diagnostics: [], stderr: message, error: message, source }; }
 
 /** WebSocket URL of the compile server's IoT gateway (real TCP / TLS / UDP for WiFiClient) */
-export function gatewayUrl() { const b = compileBase(); return b ? b.replace(/^http/, 'ws') + '/net' : ''; }
+export function gatewayUrl() {
+  let b = compileBase(); if (!b) return '';
+  if (b === BUILTIN_BASE) return location.origin.replace(/^http/, 'ws') + '/api/net';   // Vercel WebSocket function
+  if (b.startsWith('/')) b = location.origin + b;
+  return b.replace(/^http/, 'ws') + '/net';
+}
 
 export async function testServer(url) {
   const base = (url || '').trim().replace(/\/+$/, '').replace(/\/build$/, '');

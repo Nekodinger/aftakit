@@ -1,4 +1,4 @@
-# Free deployment: Hugging Face Spaces (Docker SDK) or any Docker host (Render/Fly/Railway free tiers).
+# Free deployment: Render (free web service, Docker) or any Docker host. Render: Root Directory = server.
 # Compiles Arduino Uno/Nano sketches (avr-gcc) and ESP32 / ESP8266 / Pico sketches (WebAssembly, wasi-sdk),
 # downloads Arduino libraries on demand, and runs the IoT network gateway (WebSocket /net) for WiFiClient.
 FROM python:3.12-slim
@@ -25,7 +25,7 @@ RUN mkdir -p arduino-src && cd arduino-src \
  && git clone --depth 1 https://github.com/adafruit/Adafruit_Sensor.git \
  && git clone --depth 1 https://github.com/adafruit/RTClib.git \
  && rm -rf */.git
-COPY compiler.py compiler_wasm.py libmgr.py server.py ./
+COPY compiler.py compiler_wasm.py libmgr.py server.py prewarm.py ./
 COPY esp32rt ./esp32rt
 # ArduinoJson 7.x at the exact commit the simulator runtime was tested with
 RUN mkdir -p esp32rt/ArduinoJson && cd esp32rt/ArduinoJson && git init -q \
@@ -35,7 +35,9 @@ RUN chown -R user:user /app
 USER user
 ENV PORT=7860 BUILD_CACHE=/app/.cache ARDUINO_SRC=/app/arduino-src \
     WASI_SDK=/opt/wasi/wasi-sdk-25.0-x86_64-linux WASM_OPT=/opt/wasi/binaryen-version_123/bin/wasm-opt
-RUN python -c "from compiler import core_objs; core_objs()" \
- && python -c "from compiler_wasm import runtime_objs; [runtime_objs(b) for b in ('esp32','esp8266','rp2040')]"
+# bake the compiled cores + popular libraries (Blynk, MQTT, Telegram, ThingSpeak, LCD, OLED, DHT…) into the image
+RUN COMPILE_JOBS=4 python prewarm.py
+# small free instances (512 MB): one clang at a time, one compile at a time (others wait in a queue)
+ENV COMPILE_JOBS=1 COMPILE_CONCURRENCY=1
 EXPOSE 7860
 CMD ["python", "server.py"]

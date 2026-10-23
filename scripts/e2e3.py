@@ -16,7 +16,7 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={"width": 1440, "height": 900})
     errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)))
-    pg.on("console", lambda m: errs.append(m.text) if m.type == "error" else None)
+    pg.on("console", lambda m: errs.append(m.text) if m.type == "error" and "/api/net" not in m.text else None)  # no gateway in local preview
     pg.goto(BASE); pg.wait_for_function("window.__sim && window.__sim.canvas.parts.size > 0", timeout=20000)
     pg.wait_for_timeout(800)
     ncards = pg.locator(".card").count()

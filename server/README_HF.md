@@ -6,7 +6,10 @@ colorTo: indigo
 sdk: docker
 app_port: 7860
 ---
-Compile API for the browser circuit simulator (avr-circuit-sim).
+Compile API + IoT gateway for the browser circuit simulator (avr-circuit-sim).
+
+Deploy free on Render: New → Web Service → this GitHub repo → Root Directory `server` → Language Docker →
+Instance type Free. (Hugging Face Docker Spaces need a paid plan since July 2026.)
 
 - `POST /build` `{"sketch": "..."}` → Arduino Uno / Nano (avr-gcc) → `{"hex", "stdout", "stderr"}`
 - `POST /build-wasm` `{"sketch": "...", "board": "esp32" | "esp8266" | "rp2040"}` → WebAssembly module run by the simulator → `{"wasm", "stdout", "stderr"}`

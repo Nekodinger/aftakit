@@ -8,7 +8,7 @@ Headers included by a sketch are resolved, in order, from:
      Download from downloads.arduino.cc; falls back to cloning the library's git repository at the release tag.
 Each library is described as {name, root, inc: [include dirs], srcs: [sources], deps: [header names]}.
 """
-import glob, gzip, json, os, re, shutil, subprocess, threading, time, urllib.request, zipfile
+import glob, gzip, hashlib, json, os, re, shutil, subprocess, threading, time, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.environ.get("BUILD_CACHE", os.path.join(HERE, ".cache"))
@@ -100,7 +100,7 @@ def _load_index():
     global _index, _index_err
     if _index is not None:
         return _index
-    path = os.path.join(CACHE, "library_index.json")
+    path = os.path.join(CACHE, "library_index_%s.json" % hashlib.md5(INDEX_URL.encode()).hexdigest()[:8])
     try:
         os.makedirs(CACHE, exist_ok=True)
         if not os.path.exists(path) or time.time() - os.path.getmtime(path) > 86400:
@@ -144,8 +144,28 @@ def _rank(cands, header):
 ARCH = {"esp32": "esp32", "esp8266": "esp8266", "rp2040": "rp2040"}
 
 
+_norm = lambda x: re.sub(r"[^a-z0-9]", "", x.lower())
+
+
+def _by_name(header):
+    """Many libraries declare only one header (Blynk: includes=Blynk.h) although sketches include others
+    (BlynkSimpleEsp32.h). Fall back to the library whose name best matches the header name (prefix match)."""
+    base = _norm(os.path.splitext(os.path.basename(header))[0])
+    if len(base) < 4:
+        return None
+    best, score = None, 0
+    for cands in _load_index().values():
+        for c in cands:
+            n = _norm(c[0])
+            if len(n) >= 4 and (base.startswith(n) or n.startswith(base)):
+                sc = min(len(n), len(base)) * 2 - abs(len(n) - len(base)) * 0
+                if sc > score or (sc == score and best and len(c[0]) < len(best[0])):
+                    best, score = c, sc
+    return [best] if best else None
+
+
 def index_lib(header, board="esp32", want=None):
-    cands = _load_index().get(header)
+    cands = _load_index().get(header) or (None if want else _by_name(header))
     if want:
         cands = [c for c in (cands or []) if c[0] == want]
     if not cands:
