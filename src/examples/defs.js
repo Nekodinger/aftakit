@@ -611,7 +611,284 @@ void loop() {
     wires: [W('uno:13', 'bb1:T9.e'), W('bb1:T14.e', 'uno:GND.1')] },
 
   // ======================================================================= ESP32 family: design + wiring check (code is for Arduino IDE)
-  { id: 'esp32-iot', group: 'ESP32 (mode desain)', board: 'design', title: 'ESP32: monitoring tanaman (DHT22, soil, relay, LCD)', tags: ['ESP32', 'WiFi', 'IoT'], desc: 'Rangkaian IoT ESP32 lengkap. Daya & sensor disimulasikan; wiring diperiksa (3.3 V, ADC1, strapping). Kode untuk Arduino IDE.',
+  { id: 'esp32-blink', group: 'ESP32 & IoT', board: 'esp32', title: 'ESP32: Blink + Serial Monitor', tags: ['ESP32'], desc: 'LED bawaan (GPIO2) dan LED eksternal di GPIO23 berkedip. Contoh pertama untuk ESP32 DevKit V1.',
+    code: `// ESP32 DevKit V1: LED bawaan di GPIO2, LED eksternal di GPIO23 (lewat resistor 220 ohm)
+#define LED_EKS 23
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);   // LED_BUILTIN = 2
+  pinMode(LED_EKS, OUTPUT);
+  Serial.println("ESP32 siap!");
+  Serial.printf("Chip: %s, %u MHz\\n", ESP.getChipModel(), ESP.getCpuFreqMHz());
+}
+
+void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  digitalWrite(LED_EKS, LOW);
+  Serial.println("LED bawaan ON");
+  delay(500);
+  digitalWrite(LED_BUILTIN, LOW);
+  digitalWrite(LED_EKS, HIGH);
+  Serial.println("LED eksternal ON");
+  delay(500);
+}
+`,
+    parts: [P('esp32', 'wokwi-esp32-devkit-v1', 0, 0), R('r1', 150, -20), P('led1', 'wokwi-led', 250, -50, { color: 'green' })],
+    wires: [W('esp32:D23', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'esp32:GND.1')] },
+
+  { id: 'esp32-weather', group: 'ESP32 & IoT', board: 'esp32', title: 'ESP32: cuaca internet (WiFi + HTTPS + JSON + LCD)', tags: ['ESP32', 'WiFi', 'HTTP', 'JSON'], desc: 'ESP32 mengambil suhu & kelembapan nyata dari api.open-meteo.com lewat internet perangkat ini, lalu menampilkannya di LCD I2C.',
+    code: `// ESP32: data cuaca nyata dari Open-Meteo (gratis, tanpa API key) -> LCD 16x2 I2C
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+const char* WIFI_SSID = "Wokwi-GUEST";   // di simulator nama WiFi bebas; di alat asli isi WiFi sekolah
+const char* WIFI_PASS = "";
+// Jakarta (ubah lat/lon untuk kota lain)
+const char* URL = "https://api.open-meteo.com/v1/forecast?latitude=-6.2&longitude=106.85&current=temperature_2m,relative_humidity_2m,wind_speed_10m";
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);      // SDA = GPIO21, SCL = GPIO22
+
+void setup() {
+  Serial.begin(115200);
+  lcd.init(); lcd.backlight();
+  lcd.print("Hubungkan WiFi");
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
+  Serial.println();
+  Serial.print("IP: "); Serial.println(WiFi.localIP());
+  lcd.clear(); lcd.print("WiFi OK");
+}
+
+void loop() {
+  HTTPClient http;
+  http.begin(URL);
+  int kode = http.GET();
+  if (kode == 200) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, http.getString());
+    if (!err) {
+      float suhu = doc["current"]["temperature_2m"];
+      int rh = doc["current"]["relative_humidity_2m"];
+      float angin = doc["current"]["wind_speed_10m"];
+      Serial.printf("Jakarta: %.1f C, RH %d %%, angin %.1f km/j\\n", suhu, rh, angin);
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.printf("Jakarta %.1f%cC", suhu, 223);
+      lcd.setCursor(0, 1); lcd.printf("RH%d%% %.0fkm/j", rh, angin);
+    } else Serial.println(String("JSON gagal: ") + err.c_str());
+  } else {
+    Serial.printf("HTTP gagal, kode %d\\n", kode);
+    lcd.clear(); lcd.print("HTTP gagal"); lcd.setCursor(0, 1); lcd.print(kode);
+  }
+  http.end();
+  delay(30000);   // perbarui tiap 30 detik
+}
+`,
+    parts: [P('esp32', 'wokwi-esp32-devkit-v1', 0, 0), P('lcd1', 'x-lcd1602-i2c', 170, 10, { address: '0x27', background: 'green' })],
+    wires: [W('lcd1:VCC', 'esp32:VIN'), W('lcd1:GND', 'esp32:GND.2'), W('lcd1:SDA', 'esp32:D21'), W('lcd1:SCL', 'esp32:D22')] },
+
+  { id: 'esp32-bluetooth', group: 'ESP32 & IoT', board: 'esp32', title: 'ESP32: kendali LED lewat Bluetooth', tags: ['ESP32', 'Bluetooth'], desc: 'Kirim ON / OFF / STATUS dari terminal Bluetooth (tab Bluetooth di bawah) untuk menyalakan LED di GPIO26.',
+    code: `// ESP32 BluetoothSerial: perintah dari HP (aplikasi "Serial Bluetooth Terminal") atau tab Bluetooth simulator
+#include <BluetoothSerial.h>
+BluetoothSerial BT;
+#define LED 26
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+  BT.begin("ESP32-Kelas");             // nama yang muncul saat pairing
+  Serial.println("Bluetooth siap. Kirim ON / OFF / STATUS");
+}
+
+void loop() {
+  if (BT.available()) {
+    String cmd = BT.readStringUntil('\\n');
+    cmd.trim(); cmd.toUpperCase();
+    Serial.println("Diterima: " + cmd);
+    if (cmd == "ON")      { digitalWrite(LED, HIGH); BT.println("LED menyala"); }
+    else if (cmd == "OFF") { digitalWrite(LED, LOW); BT.println("LED mati"); }
+    else if (cmd == "STATUS") BT.println(digitalRead(LED) ? "LED: ON" : "LED: OFF");
+    else BT.println("Perintah tidak dikenal: " + cmd);
+  }
+  delay(20);
+}
+`,
+    parts: [P('esp32', 'wokwi-esp32-devkit-v1', 0, 0), R('r1', -150, 50), P('led1', 'wokwi-led', -200, 0, { color: 'blue' })],
+    wires: [W('esp32:D26', 'r1:2'), W('r1:1', 'led1:A'), W('led1:C', 'esp32:GND.2')] },
+
+  { id: 'nodemcu-button', group: 'ESP32 & IoT', board: 'esp8266', title: 'NodeMCU ESP8266: tombol + LED', tags: ['ESP8266', 'NodeMCU'], desc: 'Tombol di D2 (INPUT_PULLUP) mengubah LED di D1. Nama pin D0–D8 sama seperti di Arduino IDE.',
+    code: `// NodeMCU v3 (ESP8266): tekan tombol untuk menyalakan / mematikan LED
+#define LED D1
+#define TOMBOL D2
+bool nyala = false, lalu = HIGH;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+  pinMode(TOMBOL, INPUT_PULLUP);
+  Serial.println("NodeMCU siap");
+}
+
+void loop() {
+  bool now = digitalRead(TOMBOL);
+  if (lalu == HIGH && now == LOW) {      // baru ditekan
+    nyala = !nyala;
+    digitalWrite(LED, nyala);
+    Serial.println(nyala ? "LED ON" : "LED OFF");
+  }
+  lalu = now;
+  delay(20);                             // debounce sederhana
+}
+`,
+    parts: [P('n1', 'mod-nodemcu', 0, 0), R('r1', 170, 30), P('led1', 'wokwi-led', 260, 0, { color: 'red' }), P('btn1', 'wokwi-pushbutton', 180, 120, { color: 'green' })],
+    wires: [W('n1:D1', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'n1:GND.3'), W('n1:D2', 'btn1:1.l'), W('btn1:2.l', 'n1:GND.3')] },
+
+  { id: 'esp32-blynk', group: 'ESP32 & IoT', board: 'esp32', title: 'ESP32 + Blynk IoT: suhu ke dashboard, tombol ke LED', tags: ['ESP32', 'Blynk', 'IoT'], desc: 'Library Blynk asli. Isi Template ID, nama, dan Auth Token dari blynk.cloud, lalu Jalankan. V0 = suhu DHT22, V1 = tombol LED di aplikasi Blynk.',
+    code: `// ESP32 + Blynk IoT (library asli "Blynk" dari Library Manager, koneksi lewat gateway simulator)
+// 1. blynk.cloud -> Developer Zone -> buat Template; datastream V0 (Double, suhu) dan V1 (Integer 0/1, LED)
+// 2. Buat Device dari template, salin 3 baris #define dari halaman Device Info ke bawah ini
+#define BLYNK_TEMPLATE_ID   "TMPLxxxxxxxx"
+#define BLYNK_TEMPLATE_NAME "Kelas IoT"
+#define BLYNK_AUTH_TOKEN    "IsiAuthTokenDiSini"
+#define BLYNK_PRINT Serial          // tampilkan status Blynk di Serial Monitor
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <DHT.h>
+
+#define LED 23
+DHT dht(4, DHT22);
+BlynkTimer timer;
+
+BLYNK_WRITE(V1) {                   // tombol V1 di aplikasi Blynk
+  int nilai = param.asInt();
+  digitalWrite(LED, nilai);
+  Serial.printf("Tombol V1 = %d\\n", nilai);
+}
+
+void kirimSuhu() {
+  float suhu = dht.readTemperature();
+  if (!isnan(suhu)) Blynk.virtualWrite(V0, suhu);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+  dht.begin();
+  Blynk.begin(BLYNK_AUTH_TOKEN, "Wokwi-GUEST", "");   // di alat asli: nama & password WiFi sekolah
+  timer.setInterval(2000L, kirimSuhu);
+}
+
+void loop() {
+  Blynk.run();
+  timer.run();
+}
+`,
+    parts: [P('esp32', 'wokwi-esp32-devkit-v1', 0, 0), R('r1', 150, -20), P('led1', 'wokwi-led', 250, -50, { color: 'green' }), P('dht1', 'wokwi-dht22', -170, 20, { temperature: 29, humidity: 70 })],
+    wires: [W('esp32:D23', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'esp32:GND.1'), W('dht1:VCC', 'esp32:3V3'), W('dht1:GND', 'esp32:GND.2'), W('dht1:SDA', 'esp32:D4')] },
+  { id: 'esp32-telegram', group: 'ESP32 & IoT', board: 'esp32', title: 'ESP32 + Telegram bot: perintah /led_on, /suhu', tags: ['ESP32', 'Telegram', 'IoT'], desc: 'Library UniversalTelegramBot asli lewat koneksi TLS nyata. Isi token bot dari @BotFather dan chat ID Anda.',
+    code: `// ESP32 + Telegram bot (library asli UniversalTelegramBot, TLS lewat gateway simulator)
+// Token: chat dengan @BotFather -> /newbot. Chat ID: chat dengan @userinfobot.
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <UniversalTelegramBot.h>
+#include <ArduinoJson.h>
+#include <DHT.h>
+
+#define BOT_TOKEN "123456789:ISI_TOKEN_BOT"
+#define CHAT_ID   "123456789"
+#define LED 23
+
+WiFiClientSecure client;
+UniversalTelegramBot bot(BOT_TOKEN, client);
+DHT dht(4, DHT22);
+unsigned long terakhir = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+  dht.begin();
+  WiFi.begin("Wokwi-GUEST", "");
+  while (WiFi.status() != WL_CONNECTED) { delay(250); Serial.print("."); }
+  client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
+  bot.sendMessage(CHAT_ID, "ESP32 online. Perintah: /led_on /led_off /suhu", "");
+  Serial.println("\\nBot siap");
+}
+
+void loop() {
+  if (millis() - terakhir < 1000) return;
+  terakhir = millis();
+  int n = bot.getUpdates(bot.last_message_received + 1);
+  for (int i = 0; i < n; i++) {
+    String teks = bot.messages[i].text, chat = bot.messages[i].chat_id;
+    Serial.println("Perintah: " + teks);
+    if (teks == "/led_on")       { digitalWrite(LED, HIGH); bot.sendMessage(chat, "LED menyala", ""); }
+    else if (teks == "/led_off") { digitalWrite(LED, LOW);  bot.sendMessage(chat, "LED mati", ""); }
+    else if (teks == "/suhu")    bot.sendMessage(chat, "Suhu: " + String(dht.readTemperature(), 1) + " C", "");
+    else bot.sendMessage(chat, "Perintah: /led_on /led_off /suhu", "");
+  }
+}
+`,
+    parts: [P('esp32', 'wokwi-esp32-devkit-v1', 0, 0), R('r1', 150, -20), P('led1', 'wokwi-led', 250, -50, { color: 'green' }), P('dht1', 'wokwi-dht22', -170, 20, { temperature: 29, humidity: 70 })],
+    wires: [W('esp32:D23', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'esp32:GND.1'), W('dht1:VCC', 'esp32:3V3'), W('dht1:GND', 'esp32:GND.2'), W('dht1:SDA', 'esp32:D4')] },
+  { id: 'esp32-mqtt', group: 'ESP32 & IoT', board: 'esp32', title: 'ESP32 + MQTT (broker.hivemq.com)', tags: ['ESP32', 'MQTT', 'IoT'], desc: 'PubSubClient mengirim suhu ke topik MQTT dan menerima perintah LED. Broker publik gratis, bisa dipantau dari HP (aplikasi MQTT apa pun).',
+    code: `// ESP32 + MQTT memakai broker publik broker.hivemq.com (tanpa akun)
+// Pantau dari HP/laptop: subscribe "kelasku/esp32/suhu"; kirim "ON"/"OFF" ke "kelasku/esp32/led".
+// Ganti "kelasku" dengan nama unik agar tidak bercampur dengan kelas lain.
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <DHT.h>
+
+#define LED 23
+WiFiClient wifi;
+PubSubClient mqtt(wifi);
+DHT dht(4, DHT22);
+unsigned long terakhir = 0;
+
+void pesanMasuk(char* topik, byte* isi, unsigned int panjang) {
+  String pesan; for (unsigned int i = 0; i < panjang; i++) pesan += (char)isi[i];
+  Serial.printf("Pesan [%s] %s\\n", topik, pesan.c_str());
+  digitalWrite(LED, pesan == "ON");
+}
+
+void sambung() {
+  while (!mqtt.connected()) {
+    Serial.print("Menyambung ke MQTT... ");
+    if (mqtt.connect(("esp32-kelas-" + String(random(10000))).c_str())) {
+      Serial.println("berhasil");
+      mqtt.subscribe("kelasku/esp32/led");
+    } else { Serial.printf("gagal (%d), coba lagi\\n", mqtt.state()); delay(2000); }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+  dht.begin();
+  WiFi.begin("Wokwi-GUEST", "");
+  while (WiFi.status() != WL_CONNECTED) delay(250);
+  mqtt.setServer("broker.hivemq.com", 1883);
+  mqtt.setCallback(pesanMasuk);
+}
+
+void loop() {
+  if (!mqtt.connected()) sambung();
+  mqtt.loop();
+  if (millis() - terakhir > 3000) {
+    terakhir = millis();
+    String suhu = String(dht.readTemperature(), 1);
+    mqtt.publish("kelasku/esp32/suhu", suhu.c_str());
+    Serial.println("Kirim suhu " + suhu);
+  }
+}
+`,
+    parts: [P('esp32', 'wokwi-esp32-devkit-v1', 0, 0), R('r1', 150, -20), P('led1', 'wokwi-led', 250, -50, { color: 'green' }), P('dht1', 'wokwi-dht22', -170, 20, { temperature: 29, humidity: 70 })],
+    wires: [W('esp32:D23', 'r1:1'), W('r1:2', 'led1:A'), W('led1:C', 'esp32:GND.1'), W('dht1:VCC', 'esp32:3V3'), W('dht1:GND', 'esp32:GND.2'), W('dht1:SDA', 'esp32:D4')] },
+
+  { id: 'esp32-iot', group: 'ESP32 & IoT', board: 'esp32', title: 'ESP32: monitoring tanaman (DHT22, soil, relay, LCD)', tags: ['ESP32', 'WiFi', 'IoT'], desc: 'ESP32 benar-benar menjalankan kode: WiFi tersimulasi, DHT22, sensor tanah (ADC1 12-bit), relay aktif LOW, LCD I2C. Ubah kelembapan tanah saat simulasi berjalan.',
     code: `// ESP32 DevKit V1 - monitoring tanaman (unggah dengan Arduino IDE, board "DOIT ESP32 DEVKIT V1")
 #include <WiFi.h>
 #include <Wire.h>
@@ -644,10 +921,10 @@ void loop() {
   float suhu = dht.readTemperature();
   float rh = dht.readHumidity();
   int tanah = analogRead(PIN_SOIL);           // 0..4095 (12 bit)
-  bool kering = tanah > 2600;
+  bool kering = tanah > 2000;                 // kering ~2500, basah ~1250 (kalibrasi ulang di sensor asli)
   digitalWrite(PIN_RELAY, kering ? LOW : HIGH);
   lcd.setCursor(0, 1);
-  lcd.printf("%.1fC %2.0f%% %s ", suhu, rh, kering ? "SIRAM" : "OK");
+  lcd.printf("%.1fC %2.0f%% %-5s", suhu, rh, kering ? "SIRAM" : "OK");
   Serial.printf("Suhu=%.1f RH=%.0f Tanah=%d Pompa=%s\\n", suhu, rh, tanah, kering ? "ON" : "OFF");
   delay(2000);
 }
@@ -657,7 +934,7 @@ void loop() {
     wires: [W('dht1:VCC', 'esp32:3V3'), W('dht1:GND', 'esp32:GND.1'), W('dht1:SDA', 'esp32:D4'), W('soil1:VCC', 'esp32:3V3'), W('soil1:GND', 'esp32:GND.2'), W('soil1:AOUT', 'esp32:D34'),
       W('relay1:VCC', 'esp32:VIN'), W('relay1:GND', 'esp32:GND.1'), W('relay1:IN', 'esp32:D26'), W('lcd1:VCC', 'esp32:VIN'), W('lcd1:GND', 'esp32:GND.2'), W('lcd1:SDA', 'esp32:D21'), W('lcd1:SCL', 'esp32:D22')] },
 
-  { id: 'esp32cam-pir', group: 'ESP32 (mode desain)', board: 'design', title: 'ESP32-CAM: kamera dipicu sensor gerak', tags: ['ESP32-CAM', 'PIR', 'Edge Impulse'], desc: 'Rangkaian kamera keamanan: PIR di IO13 memicu pengambilan foto. Dasar untuk proyek klasifikasi gambar (Edge Impulse).',
+  { id: 'esp32cam-pir', group: 'ESP32 & IoT', board: 'esp32', title: 'ESP32-CAM: kamera dipicu sensor gerak', tags: ['ESP32-CAM', 'PIR', 'Edge Impulse'], desc: 'PIR di IO13 memicu foto. Kamera tersimulasi memakai kamera iPad/laptop (aktifkan di tab Kamera) atau gambar contoh. Dasar proyek klasifikasi gambar (Edge Impulse).',
     code: `// ESP32-CAM (AI-Thinker) - ambil foto saat PIR mendeteksi gerakan
 // Arduino IDE: board "AI Thinker ESP32-CAM", PSRAM Enabled. Upload: IO0 ke GND, tekan RESET.
 #include "esp_camera.h"
@@ -712,7 +989,7 @@ void loop() {
     wires: [W('pir1:VCC', 'cam:5V'), W('pir1:GND', 'cam:GND'), W('pir1:OUT', 'cam:IO13')] },
 ];
 
-export const EXAMPLE_GROUPS = ['Dasar', 'Sensor & IoT', 'Tampilan', 'Aktuator & motor', 'Breadboard', 'ESP32 (mode desain)'];
+export const EXAMPLE_GROUPS = ['Dasar', 'Sensor & IoT', 'Tampilan', 'Aktuator & motor', 'Breadboard', 'ESP32 & IoT'];
 
 export function exampleModel(ex) {
   return { version: 1, parts: ex.parts, connections: ex.wires };

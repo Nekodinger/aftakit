@@ -6,10 +6,11 @@ import { Simulator, IDLE_HEX } from './sim/sim.js';
 import { checkDesign } from './sim/drc.js';
 import { CircuitCanvas } from './ui/canvas.js';
 import { Editor } from './ui/editor.js';
-import { compile, loadSettings, saveSettings, testServer, compileEndpoint, parseDiagnostics } from './compile.js';
+import { compile, loadSettings, saveSettings, testServer, compileEndpoint, parseDiagnostics, gatewayUrl, compileBase } from './compile.js';
+import { putZip, getZip, sha256, describeZip } from './libs.js';
 import { saveProject, loadProject, sharingAvailable } from './store.js';
 import { EXAMPLES, exampleModel, EXAMPLE_GROUPS } from './examples/defs.js';
-import { exampleHexText, hasExampleHex } from './examples/pack.js';
+import { exampleHexText, hasExampleHex, exampleWasm, hasExampleWasm } from './examples/pack.js';
 
 registerParts();
 const $ = (s) => document.querySelector(s);
@@ -36,7 +37,7 @@ const isNarrow = () => window.matchMedia('(max-width: 1100px)').matches;
 const isTouch = () => window.matchMedia('(pointer: coarse)').matches;
 
 const DEFAULT_CODE = `void setup() {\n  // jalankan sekali\n}\n\nvoid loop() {\n  // diulang terus-menerus\n}\n`;
-const state = { exampleId: null, projectId: null, hex: null, hexFor: null, hexOnly: false, busy: false, mode: 'design', panel: 'parts' };
+const state = { libs: [], exampleId: null, projectId: null, hex: null, hexFor: null, hexOnly: false, busy: false, mode: 'design', panel: 'parts' };
 
 // ------------------------------------------------------------------ toast
 let toastT;
@@ -44,6 +45,8 @@ function toast(text, err = false) { const t = $('#toast'); t.textContent = text;
 
 // ------------------------------------------------------------------ core objects
 const sim = new Simulator();
+// HTTP from simulated ESP32 boards: direct fetch first, then this relay for IoT services without CORS (api/proxy.js)
+sim.proxyUrl = '/api/proxy?url=';
 const canvas = new CircuitCanvas({
   viewport: $('#viewport'), world: $('#world'), wiresSvg: $('#wires'), partsHost: $('#parts'), pinLayer: $('#pinLayer'),
   emptyHint: $('#emptyHint'), zoomLabel: $('#zoomLabel'), wireHint: $('#wireHint'),
@@ -80,7 +83,7 @@ function addLog(level, text, extra = {}) {
   if (level === 'error') { errCount++; const b = $('#logBadge'); b.hidden = false; b.textContent = errCount; if ($('#console').classList.contains('collapsed')) $('#console').classList.remove('collapsed'); }
 }
 $('#logList').addEventListener('click', (e) => { const a = e.target.closest('a.jump'); if (a) { setMode('code'); editor.goto(+a.dataset.line, +a.dataset.col); } });
-$('#logClear').onclick = () => { if (consoleTab === 'serial') { serialText = ''; $('#serialOut').textContent = ''; } else { $('#logList').textContent = ''; errCount = 0; $('#logBadge').hidden = true; } };
+$('#logClear').onclick = () => { if (consoleTab === 'serial') { serialText = ''; $('#serialOut').textContent = ''; } else if (consoleTab === 'bt') $('#btOut').textContent = ''; else { $('#logList').textContent = ''; errCount = 0; $('#logBadge').hidden = true; } };
 $('#consoleToggle').onclick = () => { $('#console').classList.toggle('collapsed'); requestAnimationFrame(() => canvas._applyView()); };
 sim.on('log', (l) => addLog(l.level, l.text, { t: l.t }));
 
@@ -99,8 +102,13 @@ function fixMissingSemicolon(d, code) {
 function hintFor(msg) {
   if (/was not declared in this scope/.test(msg)) return 'Periksa ejaan nama, atau deklarasikan variabel/fungsi sebelum dipakai.';
   if (/titik koma kurang di akhir baris ini/.test(msg)) return 'Tambahkan titik koma (;) di akhir baris ini.';
+  if (/expected ';' after/.test(msg)) return 'Tambahkan titik koma (;) di akhir baris ini.';   // clang (ESP32) points at the right line
   if (/expected [‘'“]?;/.test(msg)) return 'Kemungkinan titik koma (;) kurang di akhir baris sebelumnya (kompilator menunjuk token berikutnya).';
-  if (/No such file or directory|fatal error:/.test(msg)) return 'Library tidak tersedia. Tersedia: Servo, LiquidCrystal, LiquidCrystal_I2C, Adafruit_NeoPixel, Adafruit_SSD1306 + GFX, DHT, RTClib, Wire, SPI, EEPROM, SoftwareSerial.';
+  if (/No such file or directory|fatal error:|file not found/.test(msg)) return runtimeOf(boardOf()) === 'avr'
+    ? 'Library tidak tersedia. Uno/Nano: Servo, LiquidCrystal, LiquidCrystal_I2C, Adafruit_NeoPixel, Adafruit_SSD1306 + GFX, DHT, RTClib, Wire, SPI, EEPROM, SoftwareSerial.'
+    : 'Library tidak tersedia. ESP32/ESP8266: WiFi, HTTPClient, WiFiClientSecure, ArduinoJson, BluetoothSerial, Preferences, EEPROM, Wire, SPI, LiquidCrystal(_I2C), Adafruit_SSD1306 + GFX, Adafruit_NeoPixel, DHT, ESP32Servo, RTClib, esp_camera.';
+  if (/did you mean/.test(msg)) return 'Kemungkinan salah ketik: lihat saran nama yang benar di pesan ini.';
+  if (/use of undeclared identifier/.test(msg)) return 'Periksa ejaan nama, atau deklarasikan variabel/fungsi sebelum dipakai.';
   if (/undefined reference to .(setup|loop)/.test(msg)) return 'Sketch harus punya fungsi void setup() dan void loop().';
   if (/expected [‘']\}|expected declaration/.test(msg)) return 'Kurung kurawal { } tidak seimbang.';
   return '';
@@ -112,7 +120,9 @@ function showConsole(name) {
   consoleTab = name;
   $$('[data-tab]').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
   $('#logList').hidden = name !== 'log'; $('#serialPane').hidden = name !== 'serial';
+  $('#btPane').hidden = name !== 'bt'; $('#camPane').hidden = name !== 'cam';
   if (name === 'serial') $('#serialBadge').hidden = true;
+  if (name === 'bt') $('#btBadge').hidden = true;
 }
 $$('[data-tab]').forEach((b) => (b.onclick = () => { showConsole(b.dataset.tab); $('#console').classList.remove('collapsed'); }));
 const serialOut = $('#serialOut'); let serialText = '';
@@ -123,6 +133,107 @@ sim.on('serial', (b) => {
   if (consoleTab !== 'serial') $('#serialBadge').hidden = false;
 });
 $('#serialForm').onsubmit = (e) => { e.preventDefault(); const i = $('#serialIn'); if (!sim.running) { toast('Jalankan simulasi dulu untuk mengirim data serial.', true); return; } sim.serialWrite(i.value + $('#serialEol').value.replace('\\n', '\n').replace('\\r', '\r')); i.value = ''; };
+
+// ------------------------------------------------------------------ Bluetooth terminal (simulated phone app)
+const btOut = $('#btOut');
+function btAppend(text, mine) {
+  const sp = document.createElement('span'); if (mine) sp.className = 'me'; sp.textContent = text; btOut.append(sp);
+  while (btOut.childNodes.length > 600) btOut.firstChild.remove();
+  btOut.scrollTop = btOut.scrollHeight;
+  if (!mine && consoleTab !== 'bt') $('#btBadge').hidden = false;
+}
+function btReset() { btOut.textContent = ''; $('#btDot').className = 'dot'; $('#btName').textContent = 'Bluetooth belum aktif (program memanggil BT.begin)'; }
+const btDec = new TextDecoder();
+sim.on('bt', (e) => {
+  if (e.type === 'begin') {
+    $('#btDot').className = 'dot on'; $('#btName').textContent = `Tersambung ke "${e.name}" (Bluetooth Serial tersimulasi)`; $('#tabBt').hidden = false;
+    addLog('info', `Bluetooth aktif: "${e.name}". Buka tab Bluetooth untuk mengirim/menerima data seperti aplikasi Serial Bluetooth Terminal di HP.`);
+  } else btAppend(btDec.decode(e.bytes, { stream: true }).replace(/\r/g, ''), false);
+});
+function btSend(text) {
+  if (!sim.running) { toast('Jalankan simulasi dulu untuk mengirim data Bluetooth.', true); return; }
+  if (sim.board.kind !== 'esp32') { toast('Bluetooth Classic hanya ada di ESP32.', true); return; }
+  sim.btWrite(text + '\n'); btAppend('> ' + text + '\n', true);
+}
+$('#btForm').onsubmit = (e) => { e.preventDefault(); const i = $('#btIn'); if (i.value) btSend(i.value); i.value = ''; };
+$$('[data-bt]').forEach((b) => (b.onclick = () => btSend(b.dataset.bt)));
+// HTTP requests go through this device's real internet connection
+sim.on('net', ({ method, url }) => addLog('info', `🌐 ${method} ${url.length > 90 ? url.slice(0, 90) + '…' : url}`));
+
+// ------------------------------------------------------------------ ESP32-CAM image source (sample / device camera / photo)
+const CAM_W = 320, CAM_H = 240, SAMPLE = import.meta.env.BASE_URL + 'cam-sample.jpg';
+const camCanvas = document.createElement('canvas'); camCanvas.width = CAM_W; camCanvas.height = CAM_H;
+let camStream = null, camTimer = null, lastShotUrl = null, lastShotT = 0;
+$('#camSample').src = SAMPLE;
+function drawCover(src, sw, sh) {
+  const g = camCanvas.getContext('2d'), s = Math.max(CAM_W / sw, CAM_H / sh), w = sw * s, h = sh * s;
+  g.drawImage(src, (CAM_W - w) / 2, (CAM_H - h) / 2, w, h);
+  return new Promise((res) => camCanvas.toBlob(async (bl) => res(bl ? new Uint8Array(await bl.arrayBuffer()) : null), 'image/jpeg', 0.7));
+}
+function stopCamera() { clearInterval(camTimer); camTimer = null; camStream?.getTracks().forEach((t) => t.stop()); camStream = null; $('#camVideo').hidden = true; }
+async function setCamSource(kind) {
+  stopCamera(); $('#camSample').hidden = kind === 'device';
+  if (kind === 'sample') { sim.cameraFrame = null; $('#camSample').src = SAMPLE; $('#camStatus').textContent = ''; return; }
+  if (kind === 'photo') { $('#camFile').click(); return; }
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    const v = $('#camVideo'); v.srcObject = camStream; v.hidden = false; await v.play();
+    const grab = async () => { if (v.videoWidth) { const bytes = await drawCover(v, v.videoWidth, v.videoHeight); if (bytes) sim.cameraFrame = { bytes, w: CAM_W, h: CAM_H }; } };
+    await grab(); camTimer = setInterval(grab, 400);
+    $('#camStatus').textContent = 'Kamera aktif — foto ESP32-CAM diambil dari kamera ini.';
+  } catch (e) {
+    $('#camStatus').textContent = 'Kamera tidak bisa dibuka (' + (e.name === 'NotAllowedError' ? 'izin ditolak' : e.message) + '). Memakai gambar contoh.';
+    document.querySelector('input[name=camSrc][value=sample]').checked = true; $('#camSample').hidden = false; sim.cameraFrame = null;
+  }
+}
+$$('input[name=camSrc]').forEach((r) => (r.onchange = () => r.checked && setCamSource(r.value)));
+$('#camFile').onchange = async () => {
+  const f = $('#camFile').files[0]; if (!f) return;
+  const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
+  const bytes = await drawCover(img, img.naturalWidth, img.naturalHeight);
+  sim.cameraFrame = bytes ? { bytes, w: CAM_W, h: CAM_H } : null; $('#camSample').src = img.src;
+  $('#camStatus').textContent = `Foto "${f.name}" dipakai sebagai gambar kamera (${CAM_W}×${CAM_H}).`; $('#camFile').value = '';
+};
+sim.on('camera', (f) => {
+  $('#tabCam').hidden = false;
+  const now = performance.now(); if (now - lastShotT < 150) return; lastShotT = now;
+  if (lastShotUrl) URL.revokeObjectURL(lastShotUrl);
+  lastShotUrl = f.builtin ? null : URL.createObjectURL(new Blob([f.bytes], { type: 'image/jpeg' }));
+  $('#camShot').src = lastShotUrl || SAMPLE;
+  $('#camShotInfo').textContent = `Foto terakhir · ${f.builtin ? '320×240 (gambar contoh)' : `${f.w}×${f.h} · ${(f.bytes.length / 1024).toFixed(1)} KB`} · t=${(sim.board.cpu.cycles / 16e6).toFixed(1)} s`;
+});
+function updateBoardTabs() {
+  const b = boardOf(), kind = runtimeOf(b);
+  $('#tabBt').hidden = !(kind === 'esp32' && /BluetoothSerial/.test(editor.value));
+  $('#tabCam').hidden = !(b?.part.type === 'mod-esp32-cam' || /esp_camera\.h/.test(editor.value));
+  if ((consoleTab === 'bt' && $('#tabBt').hidden) || (consoleTab === 'cam' && $('#tabCam').hidden)) showConsole('log');
+}
+
+// ------------------------------------------------------------------ user libraries (.zip) + gateway info
+function renderLibs() {
+  const host = $('#libList'); if (!host) return;
+  host.innerHTML = state.libs.length ? state.libs.map((l, i) => `<div class="lib-item"><div class="grow"><b>${esc(l.name)}</b>${l.edgeImpulse ? '<span class="tag">Edge Impulse</span> ' : ''}
+    <span class="muted small">${(l.size / 1048576).toFixed(1)} MB</span>${l.include ? `<br><code>#include &lt;${esc(l.include)}&gt;</code>` : ''}</div>
+    <button class="mini" data-libdel="${i}" title="Hapus dari proyek">Hapus</button></div>`).join('') : '<p class="muted small">Belum ada library .zip di proyek ini.</p>';
+  $('#libBadge').hidden = !state.libs.length; $('#libBadge').textContent = state.libs.length || '';
+  const gw = gatewayUrl();
+  $('#gwInfo').innerHTML = gw ? `WiFiClient, WiFiClientSecure, WiFiUDP, MQTT, Blynk, Telegram memakai koneksi nyata lewat gateway server kompilasi (<code>${esc(gw)}</code>). Hanya koneksi keluar; port: 80, 443, 1883, 8883, 8080, 8443, 9443, UDP 53/123/5683.`
+    : 'Gateway belum aktif: atur URL server kompilasi di Berkas → Pengaturan. Tanpa gateway, HTTPClient tetap jalan (lewat browser), tetapi Blynk/MQTT/Telegram tidak bisa tersambung.';
+}
+$('#libAdd').onclick = () => $('#libFile').click();
+$('#libFile').onchange = async () => {
+  const f = $('#libFile').files[0]; $('#libFile').value = ''; if (!f) return;
+  try {
+    if (f.size > 60 << 20) throw new Error('file terlalu besar (maks 60 MB)');
+    const buf = await f.arrayBuffer(); const d = describeZip(f.name, buf); const sha = await sha256(buf);
+    await putZip(sha, new Blob([buf], { type: 'application/zip' }));
+    state.libs = [...state.libs.filter((l) => l.sha !== sha), { name: d.name, sha, size: f.size, include: d.include, edgeImpulse: d.edgeImpulse }];
+    renderLibs(); addLog('ok', `Library "${d.name}" ditambahkan${d.include ? ` — pakai #include <${d.include}>` : ''}.`);
+    toast('Library ditambahkan.');
+  } catch (e) { toast('Gagal menambah library: ' + e.message, true); }
+};
+$('#libList').onclick = (e) => { const b = e.target.closest('[data-libdel]'); if (!b) return; state.libs.splice(+b.dataset.libdel, 1); renderLibs(); };
+renderLibs();
 
 // ------------------------------------------------------------------ modes & panels
 function setMode(m) {
@@ -154,9 +265,10 @@ if (isNarrow()) $('#workspace').classList.add('lp-closed');
 // ------------------------------------------------------------------ status
 function setStatus(kind, text) { $('#simDot').className = 'dot ' + (kind || ''); $('#simText').textContent = text; }
 function setCompilerState(t) { $('#compilerState').textContent = t; }
+const runtimeOf = (b) => (b?.cat.runtime === 'wasm' ? b.cat.wasm : 'avr');
 function boardOf() { const p = [...canvas.parts.values()].find((x) => BY_TAG[x.type]?.board); return p ? { part: p, cat: BY_TAG[p.type], runnable: BY_TAG[p.type].sim === 'full' } : null; }
 function updateBoardInfo() {
-  const b = boardOf();
+  const b = boardOf(); queueMicrotask(updateBoardTabs);
   const txt = !b ? '· tanpa mikrokontroler (rangkaian listrik saja)' : b.runnable ? `· ${b.cat.name} · kode dijalankan` : `· ${b.cat.name} · mode desain (kode tidak dijalankan)`;
   $('#boardInfo').textContent = txt;
   $('#boardTarget').textContent = b ? `Target: ${b.cat.name}${b.runnable ? '' : ' — hanya bisa dikompilasi & diunggah lewat Arduino IDE'}` : 'Tanpa board';
@@ -168,7 +280,14 @@ sim.on('state', (s) => {
   document.body.classList.toggle('is-running', r);
 });
 sim.on('tick', ({ time }) => {
-  if (state.boardEl) { const b = sim.board; try { state.boardEl.led13 = !!b.pins['13']?.level; state.boardEl.ledPower = true; } catch { /* no led props */ } }
+  if (state.boardEl) {
+    const b = sim.board;
+    try {
+      if (b.kind === 'avr') state.boardEl.led13 = !!b.pins['13']?.level;
+      else if (state.boardEl.tagName === 'WOKWI-ESP32-DEVKIT-V1') state.boardEl.led1 = !!b.pins.D2?.level;  // blue LED on GPIO2
+      state.boardEl.ledPower = true;
+    } catch { /* no led props */ }
+  }
   if (sim.running) $('#simText').textContent = `Berjalan · ${time.toFixed(1)} s`;
 });
 function stopSim(msg) { if (sim.running) { sim.stop(); if (msg) addLog('info', msg); } }
@@ -192,13 +311,17 @@ $('#tbCheck').onclick = () => showPanel('check', true);
 async function doCompile() {
   const b = boardOf();
   if (b && !b.runnable) {
-    const msg = `${b.cat.name} memakai inti ${b.cat.mcu}. Simulator ini hanya menjalankan kode ATmega328P (Uno/Nano). Unduh kode (.ino) lalu kompilasi & unggah dengan Arduino IDE (pilih board ${b.cat.mcu}).`;
+    const msg = `${b.cat.name} memakai inti ${b.cat.mcu}. Simulator ini menjalankan kode Uno/Nano (ATmega328P), ESP32, ESP32-CAM, NodeMCU/D1 mini (ESP8266) dan Pico. Untuk board ini unduh kode (.ino) lalu kompilasi & unggah dengan Arduino IDE.`;
     $('#buildOut').textContent = msg; addLog('info', msg); setCompilerState('Tidak dikompilasi'); return false;
   }
   const code = editor.value;
   setCompilerState('Mengompilasi…');
-  const exd = state.exampleId && EXAMPLES.find((e) => e.id === state.exampleId), pk = exd ? await exampleHexText(exd.id) : null, pre = pk ? { code: exd.code, ...pk } : null;
-  const res = await compile(code, { precompiled: pre });
+  const kind = runtimeOf(b);
+  const exd = state.exampleId && EXAMPLES.find((e) => e.id === state.exampleId);
+  let pre = null;
+  if (exd && kind === 'avr') { const pk = await exampleHexText(exd.id); pre = pk ? { code: exd.code, ...pk } : null; }
+  else if (exd) { const pw = exampleWasm(exd.id); pre = pw ? { code: exd.code, ...pw } : null; }
+  const res = await compile(code, { precompiled: pre, board: kind, libs: kind === 'avr' ? [] : state.libs, getLib: getZip, onProgress: (t) => { setCompilerState(t); $('#buildOut').textContent = t; } });
   $('#buildOut').textContent = [res.stdout, res.stderr].filter(Boolean).join('\n') || '(tidak ada keluaran)';
   const diags = (res.diagnostics?.length ? res.diagnostics : parseDiagnostics(res.stderr)).map((d) => fixMissingSemicolon(d, code));
   editor.setMarks(diags);
@@ -211,22 +334,29 @@ async function doCompile() {
     return false;
   }
   for (const d of diags) addLog('warn', d.message, { line: d.line, col: d.col, msg: d.message });
-  state.hex = res.hex; state.hexFor = code; state.hexOnly = false;
-  const size = (res.stdout || '').split('\n').find((l) => /Sketch uses/.test(l));
+  state.hex = res.hex || null; state.wasm = res.wasm || null; state.hexFor = kind + '|' + state.libs.map((l) => l.sha).join(',') + '|' + code; state.hexOnly = false;
+  for (const line of (res.stdout || '').split('\n')) { if (/^Library Manager:/.test(line)) addLog('info', line); else if (/^PERINGATAN/.test(line)) addLog('warn', line); }
+  const size = res.wasm ? `Program ${kind.toUpperCase()} (WebAssembly) ${(res.wasm.length / 1024).toFixed(0)} KB.` : (res.stdout || '').split('\n').find((l) => /Sketch uses/.test(l));
   addLog('ok', `Kompilasi berhasil (${res.source}).${size ? ' ' + size : ''}`);
   setCompilerState('Siap · ' + res.source);
   return true;
 }
 
-function buildSim(hex) {
+// prog: Intel HEX text (Uno/Nano) or a WebAssembly module (Uint8Array) for ESP32 / ESP8266 / Pico
+async function buildSim(prog) {
   stopSim();
   const model = canvas.simModel();
   const b = boardOf(); state.boardEl = b?.runnable ? b.part.el : null;
+  sim.gatewayUrl = gatewayUrl();
   const diag = sim.build(model, canvas.elements());
   if (diag.errors.length) { for (const e of diag.errors) addLog('error', e); setStatus('err', 'Rangkaian bermasalah'); return false; }
-  sim.loadHex(hex);
+  if (prog instanceof Uint8Array) {
+    if (sim.board.kind === 'avr') { addLog('error', 'Program ESP32 tidak bisa dijalankan di board ini. Tekan Kompilasi lagi.'); return false; }
+    await sim.loadWasm(prog);
+  } else sim.loadHex(prog);
   return true;
 }
+const currentProg = (b) => (b?.runnable || state.hexOnly ? (runtimeOf(b) !== 'avr' && !state.hexOnly ? state.wasm : state.hex) : IDLE_HEX);
 
 async function run() {
   if (state.busy) return; state.busy = true; $('#btnRun').disabled = true;
@@ -234,17 +364,18 @@ async function run() {
     if (state.mode !== 'simulate') setMode('simulate');
     const b = boardOf();
     if (b?.runnable || state.hexOnly) {
-      if (!state.hexOnly && (state.hexFor !== editor.value || !state.hex)) { if (!(await doCompile())) return; }
-      if (!state.hex) { addLog('error', 'Belum ada program.'); return; }
-      if (!buildSim(state.hex)) return;
-      serialText = ''; serialOut.textContent = '';
+      if (!state.hexOnly && (state.hexFor !== runtimeOf(b) + '|' + state.libs.map((l) => l.sha).join(',') + '|' + editor.value || !currentProg(b))) { if (!(await doCompile())) return; }
+      const prog = currentProg(b);
+      if (!prog) { addLog('error', 'Belum ada program.'); return; }
+      if (!(await buildSim(prog))) return;
+      serialText = ''; serialOut.textContent = ''; btReset();
       sim.start(); addLog('info', 'Simulasi dimulai.');
     } else {
       const res = runCheck(true);
       if (b) addLog('info', `${b.cat.name}: mode desain. Daya, sensor, saklar, relay, dan motor disimulasikan; pin GPIO tidak dikendalikan karena kode ${b.cat.mcu} tidak dapat dijalankan di sini.`);
       else addLog('info', 'Tanpa mikrokontroler: rangkaian dijalankan sebagai rangkaian listrik (baterai, saklar, LED, relay, motor).');
       if (res.some((r) => r.level === 'error')) addLog('error', 'Ada kesalahan rangkaian. Lihat panel Periksa.');
-      if (!buildSim(IDLE_HEX)) return;
+      if (!(await buildSim(IDLE_HEX))) return;
       sim.start();
     }
   } catch (e) { addLog('error', e.message); setStatus('err', 'Galat'); console.error(e); }
@@ -252,11 +383,11 @@ async function run() {
 }
 $('#btnRun').onclick = run; $('#btnRun2').onclick = run;
 $('#btnStop').onclick = () => stopSim('Simulasi dihentikan.');
-$('#btnReset').onclick = () => {
+$('#btnReset').onclick = async () => {
   const b = boardOf();
-  const hex = b?.runnable || state.hexOnly ? state.hex : IDLE_HEX;
-  if (!hex) { toast('Belum ada program untuk di-reset.', true); return; }
-  const was = sim.running; if (buildSim(hex)) { serialText = ''; serialOut.textContent = ''; addLog('info', 'Program dimulai ulang dari awal.'); if (was) sim.start(); else { sim.advance(0); setStatus('', 'Berhenti'); } }
+  const prog = currentProg(b);
+  if (!prog) { toast('Belum ada program untuk di-reset.', true); return; }
+  const was = sim.running; if (await buildSim(prog)) { serialText = ''; serialOut.textContent = ''; btReset(); addLog('info', 'Program dimulai ulang dari awal.'); if (was) sim.start(); else { sim.advance(0); setStatus('', 'Berhenti'); } }
 };
 $('#btnCompile').onclick = async () => { if (state.busy) return; state.busy = true; try { await doCompile(); } finally { state.busy = false; } };
 $('#bCompile').onclick = async () => { if (state.busy) return; state.busy = true; try { await doCompile(); updateBuildView(); } finally { state.busy = false; } };
@@ -439,7 +570,7 @@ function renderProps(soft) {
 async function loadExample(id) {
   const ex = EXAMPLES.find((e) => e.id === id); if (!ex) return;
   stopSim(); await canvas.setModel(exampleModel(ex));
-  editor.value = ex.code; state.exampleId = id; state.projectId = null; state.hex = null; state.hexFor = null; state.hexOnly = false;
+  editor.value = ex.code; state.exampleId = id; state.projectId = null; state.libs = []; renderLibs(); state.hex = null; state.wasm = null; state.hexFor = null; state.hexOnly = false;
   $('#projectTitle').value = ex.title; editor.marks.clear();
   addLog('info', `Contoh dimuat: ${ex.title}. ${ex.board === 'design' ? 'Board ini dalam mode desain; tekan Jalankan untuk memeriksa rangkaian.' : 'Tekan Jalankan.'}`);
   history.replaceState(null, '', '#ex=' + id);
@@ -455,10 +586,11 @@ function closeMenus() { $$('.menu.open').forEach((m) => m.classList.remove('open
 $$('.menu > .mb').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const m = b.parentElement, o = m.classList.contains('open'); closeMenus(); if (!o) m.classList.add('open'); }));
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.menu')) closeMenus(); });
 
-function projectData() { const m = canvas.getModel(); return { v: 2, title: $('#projectTitle').value, code: editor.value, parts: m.parts, connections: m.connections, example: state.exampleId }; }
+function projectData() { const m = canvas.getModel(); return { v: 2, title: $('#projectTitle').value, code: editor.value, parts: m.parts, connections: m.connections, example: state.exampleId, libs: state.libs }; }
 async function applyProject(d) {
   stopSim(); await canvas.setModel({ parts: d.parts || [], connections: d.connections || [] });
-  editor.value = d.code || DEFAULT_CODE; $('#projectTitle').value = d.title || 'Proyek'; state.exampleId = d.example && EXAMPLES.find((e) => e.id === d.example)?.code === d.code && hasExampleHex(d.example) ? d.example : null;
+  editor.value = d.code || DEFAULT_CODE; $('#projectTitle').value = d.title || 'Proyek'; state.exampleId = d.example && EXAMPLES.find((e) => e.id === d.example)?.code === d.code && (hasExampleHex(d.example) || hasExampleWasm(d.example)) ? d.example : null;
+  state.libs = Array.isArray(d.libs) ? d.libs.filter((l) => l && /^[0-9a-f]{64}$/.test(l.sha)) : []; renderLibs();
   state.hex = null; state.hexFor = null; state.hexOnly = false; updateBoardInfo(); runCheck();
 }
 function download(name, text, type = 'text/plain') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
@@ -466,10 +598,10 @@ const fname = () => ($('#projectTitle').value || 'proyek').replace(/[^\w\-]+/g, 
 let fileMode = null;
 async function doAction(act) {
   switch (act) {
-    case 'new': stopSim(); await canvas.setModel({ parts: [], connections: [] }); editor.value = DEFAULT_CODE; state.exampleId = null; state.hex = null; state.hexFor = null; $('#projectTitle').value = 'Proyek tanpa judul'; history.replaceState(null, '', location.pathname); updateBoardInfo(); runCheck(); break;
+    case 'new': stopSim(); await canvas.setModel({ parts: [], connections: [] }); editor.value = DEFAULT_CODE; state.exampleId = null; state.libs = []; renderLibs(); state.hex = null; state.hexFor = null; $('#projectTitle').value = 'Proyek tanpa judul'; history.replaceState(null, '', location.pathname); updateBoardInfo(); runCheck(); break;
     case 'export-json': download(fname() + '.json', JSON.stringify(projectData(), null, 2), 'application/json'); break;
     case 'export-ino': download(fname() + '.ino', editor.value); break;
-    case 'export-hex': if (state.hex) download(fname() + '.hex', state.hex); else toast('Belum ada hasil kompilasi. Tekan Kompilasi dulu.', true); break;
+    case 'export-hex': if (state.hex) download(fname() + '.hex', state.hex); else toast(state.wasm ? 'File .hex hanya untuk Uno/Nano. Untuk ESP32 unduh .ino lalu unggah lewat Arduino IDE.' : 'Belum ada hasil kompilasi. Tekan Kompilasi dulu.', true); break;
     case 'import-json': fileMode = 'json'; $('#fileIn').accept = '.json,application/json'; $('#fileIn').click(); break;
     case 'import-hex': fileMode = 'hex'; $('#fileIn').accept = '.hex'; $('#fileIn').click(); break;
     case 'settings': openSettings(); break;
@@ -523,19 +655,20 @@ $('#shareCopy').onclick = async () => { const i = $('#shareUrl'); i.select(); tr
 
 // ------------------------------------------------------------------ settings, help, theme
 function openSettings() { const s = loadSettings(); $('#setUrl').value = s.url || ''; $('#setStatus').textContent = compileEndpoint() ? 'Endpoint aktif: ' + compileEndpoint() : 'Belum ada server kompilator.'; $('#dlgSettings').showModal(); }
-$('#setSave').onclick = () => { saveSettings({ url: $('#setUrl').value.trim() }); toast('Pengaturan disimpan.'); updateBuildView(); };
+$('#setSave').onclick = () => { saveSettings({ url: $('#setUrl').value.trim() }); toast('Pengaturan disimpan.'); updateBuildView(); renderLibs(); };
 $('#setTest').onclick = async () => { $('#setStatus').textContent = 'Menguji…'; const r = await testServer($('#setUrl').value); $('#setStatus').textContent = r.text; };
 function openHelp() {
   $('#helpTitle').textContent = 'Cara pakai';
   $('#helpBody').innerHTML = `<h4>Menambah komponen</h4><ul><li>Ketuk kartu komponen untuk menaruhnya di tengah kanvas.</li><li>Di iPad: tahan kartu sebentar lalu seret ke kanvas. Dengan mouse: langsung seret.</li><li>Letakkan komponen di atas breadboard: kakinya menempel otomatis ke lubang terdekat.</li></ul>
   <h4>Membuat kabel</h4><ul><li>Ketuk pin pertama, lalu ketuk pin tujuan. Atau seret dari pin ke pin.</li><li>Ketuk kabel untuk memilih, lalu ganti warna atau hapus di panel Properti.</li></ul>
   <h4>Kanvas</h4><ul><li>Satu jari di area kosong: geser kanvas. Dua jari: cubit untuk zoom.</li><li>Seret komponen untuk memindah. Saat simulasi berjalan, seret lewat label nama di atasnya.</li><li>Tombol putar, duplikat, hapus, urungkan/ulangi ada di toolbar atas.</li></ul>
-  <h4>Simulasi</h4><ul><li>Desain → Kode → Simulasi. Tekan <b>Jalankan</b>; galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Arduino Uno/Nano: kode dijalankan. ESP32/ESP8266/Pico: mode desain (daya & sensor disimulasikan, wiring diperiksa).</li></ul>`;
+  <h4>Simulasi</h4><ul><li>Desain → Kode → Simulasi. Tekan <b>Jalankan</b>; galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Kode dijalankan untuk Arduino Uno/Nano, ESP32 DevKit, ESP32-CAM, NodeMCU / Wemos D1 mini (ESP8266) dan Raspberry Pi Pico.</li></ul>
+  <h4>ESP32: WiFi, internet, Bluetooth, kamera</h4><ul><li><b>WiFi</b> tersimulasi: <code>WiFi.begin()</code> tersambung ±1 detik (nama/password bebas, mis. "Wokwi-GUEST"), IP 10.10.0.2.</li><li><b>Internet nyata</b>: <code>HTTPClient</code> (GET/POST, http/https) memakai koneksi iPad/laptop ini; layanan tanpa izin CORS otomatis lewat proxy simulator.</li><li><b>Blynk, Telegram, MQTT, ThingSpeak</b>: <code>WiFiClient</code> / <code>WiFiClientSecure</code> / <code>WiFiUDP</code> tersambung sungguhan lewat <b>gateway IoT</b> server kompilasi (seperti Wokwi), jadi library asli (BlynkSimpleEsp32, UniversalTelegramBot, PubSubClient…) dan API key asli langsung bisa dipakai.</li><li><b>Library</b>: <code>#include</code> library dari Arduino Library Manager diunduh otomatis. Library .zip (mis. Edge Impulse) ditambahkan di panel <b>Library</b>.</li><li><b>Bluetooth</b>: <code>BluetoothSerial</code> tersambung ke tab <b>Bluetooth</b> di konsol (seperti aplikasi Serial Bluetooth Terminal di HP).</li><li><b>ESP32-CAM</b>: <code>esp_camera_fb_get()</code> mengambil foto JPEG dari tab <b>Kamera</b>: kamera iPad/laptop, foto unggahan, atau gambar contoh.</li><li>Seperti ESP32 asli: ADC2 (GPIO 0, 2, 4, 12–15, 25–27) tidak bisa dibaca saat WiFi aktif — pakai GPIO 32–39. GPIO 34–39 hanya input. Logika 3,3 V.</li><li><b>Edge Impulse</b>: unggah ekspor "Arduino library" di panel Library; ESP32-CAM memakai gambar dari tab Kamera (<code>fmt2rgb888</code> didukung).</li><li>Belum didukung: WebServer / server di dalam ESP32 (gateway hanya koneksi keluar), Bluetooth BLE, FreeRTOS task. Waktu CPU diperkirakan, bukan akurat per siklus.</li></ul>`;
   $('#dlgHelp').showModal();
 }
 function openAbout() {
   $('#helpTitle').textContent = 'Tentang simulator';
-  $('#helpBody').innerHTML = `<p>Emulator AVR ATmega328P (avr8js) dengan pemecah rangkaian, ${CATALOG.length} komponen (${CATALOG.filter((c) => c.sim === 'full').length} disimulasikan), I2C (LCD, OLED, MPU6050, RTC), DHT11/22, relay, motor & driver, breadboard, dan pemeriksaan rangkaian ESP32.</p><p class="muted small">Komponen Wokwi Elements (MIT). Dibuat untuk pembelajaran STEAM.</p>`;
+  $('#helpBody').innerHTML = `<p>Emulator AVR ATmega328P (avr8js) dan runtime Arduino-ESP32/ESP8266/Pico berbasis WebAssembly (kode dikompilasi dengan clang, WiFi/HTTP/Bluetooth/kamera lewat perangkat ini), dengan pemecah rangkaian, ${CATALOG.length} komponen (${CATALOG.filter((c) => c.sim === 'full').length} disimulasikan), I2C (LCD, OLED, MPU6050, RTC), DHT11/22, relay, motor & driver, breadboard, dan pemeriksaan rangkaian ESP32 (3,3 V, ADC1/ADC2, strapping).</p><p class="muted small">Komponen Wokwi Elements (MIT). Dibuat untuk pembelajaran STEAM.</p>`;
   $('#dlgHelp').showModal();
 }
 $('#btnTheme').onclick = () => { const d = document.documentElement; const t = d.dataset.theme === 'dark' ? 'light' : 'dark'; d.dataset.theme = t; try { localStorage.setItem('sim.theme', t); } catch { /* private mode */ } };

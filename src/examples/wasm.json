@@ -1,0 +1,47 @@
+{
+ "esp32-blink": {
+  "file": "wasm/esp32-blink-f5cbd6768f.wasm",
+  "board": "esp32",
+  "bytes": 198111
+ },
+ "esp32-weather": {
+  "file": "wasm/esp32-weather-b67ef743ee.wasm",
+  "board": "esp32",
+  "bytes": 244221
+ },
+ "esp32-bluetooth": {
+  "file": "wasm/esp32-bluetooth-5383aa2573.wasm",
+  "board": "esp32",
+  "bytes": 181006
+ },
+ "nodemcu-button": {
+  "file": "wasm/nodemcu-button-9f038dca73.wasm",
+  "board": "esp8266",
+  "bytes": 168776
+ },
+ "esp32-blynk": {
+  "file": "wasm/esp32-blynk-2b4dc91460.wasm",
+  "board": "esp32",
+  "bytes": 251958
+ },
+ "esp32-telegram": {
+  "file": "wasm/esp32-telegram-c2753720e3.wasm",
+  "board": "esp32",
+  "bytes": 304432
+ },
+ "esp32-mqtt": {
+  "file": "wasm/esp32-mqtt-701efad3ce.wasm",
+  "board": "esp32",
+  "bytes": 234076
+ },
+ "esp32-iot": {
+  "file": "wasm/esp32-iot-118dff5912.wasm",
+  "board": "esp32",
+  "bytes": 215606
+ },
+ "esp32cam-pir": {
+  "file": "wasm/esp32cam-pir-bef2598211.wasm",
+  "board": "esp32",
+  "bytes": 197820
+ }
+}

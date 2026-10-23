@@ -1,5 +1,7 @@
 // Orchestrator: wires the AVR core, netlist solver, behaviours and the frame loop together.
-import { AvrBoard, PIN_MAP, CLOCK_HZ } from './avr.js';
+import { AvrBoard, CLOCK_HZ } from './avr.js';
+import { WasmBoard } from './wasmboard.js';
+import { NetGateway } from './netgw.js';
 import { Circuit } from './circuit.js';
 import { BEHAVIORS as B1 } from './behaviors.js';
 import { BEHAVIORS2 } from './behaviors2.js';
@@ -14,7 +16,6 @@ export const IDLE_HEX = ':02000000FFCF30\n:00000001FF\n';
 
 export class Simulator {
   constructor() {
-    this.board = new AvrBoard();
     this.audio = new Audio();
     this.handlers = {};
     this.running = false;
@@ -25,24 +26,113 @@ export class Simulator {
     this.last = null;
     this.circuit = null;
     this.i2c = new I2CBus(this);
-    this.board.onInit = () => this.i2c.attach(this.board.twi);
-    this.i2c.attach(this.board.twi);
-    this.board.serialListeners.push(Object.assign((b) => this.emit('serial', b), { keep: true }));
+    this.avr = new AvrBoard();
+    this.board = this.avr;
+    this._bindBoard(this.avr);
+    this.btHandlers = [];
+  }
+
+  _bindBoard(board) {
+    board.serialListeners = board.serialListeners.filter((l) => !l.keep);
+    board.serialListeners.push(Object.assign((b) => this.emit('serial', b), { keep: true }));
+    if (board.kind !== 'avr') return;
+    board.onInit = () => this.i2c.attach(board.twi);
+    this.i2c.attach(board.twi);
     // A pin driven by firmware that shares a net with a closed switch (keypad matrix, button chains) must
     // be re-solved immediately: sketches write a column and read the rows within a few cycles.
-    this.board.afterChange = (names) => {
+    board.afterChange = (names) => {
       if (this._resolving || !this.coupled || !this.coupled.size || !this.circuit) return;
       if (!names.some((n) => this.ardNets && this.coupled.has(this.ardNets[n]))) return;
       this._resolving = true;
       try { this.resolveNow(); } finally { this._resolving = false; }
     };
     // used by the AVR core the moment firmware reconfigures a pin as input / enables a pull-up
-    this.board.inputResolver = (name) => {
+    board.inputResolver = (name) => {
       const net = this.ardNets && this.ardNets[name];
-      const pull = this.board.isPullup(name);
+      const pull = board.isPullup(name);
       if (net === undefined || !this.last) return pull;
       const v = this.last.v(net);
       return v === null ? pull : v > 0.5;
+    };
+  }
+
+  // host services for WebAssembly boards (ESP32 / ESP8266 / RP2040)
+  _wasmHost() {
+    const sim = this;
+    const netOf = (name) => sim.ardNets[name] ?? -1;
+    const partsOn = (net) => (net < 0 ? [] : (sim.circuit.members[net] || []).map((m) => { const i = m.indexOf(':'); return { id: m.slice(0, i), pin: m.slice(i + 1) }; }));
+    const partById = (id) => sim.model.parts.find((p) => p.id === id);
+    const v = (net) => (sim.last && net >= 0 ? sim.last.v(net) : null);
+    const powered = (id, vccPins, gndPins) => {
+      const vc = vccPins.map((p) => v(sim.circuit.net(id, p))).find((x) => x !== null && x !== undefined);
+      const gd = gndPins.map((p) => v(sim.circuit.net(id, p))).find((x) => x !== null && x !== undefined);
+      return vc !== undefined && gd !== undefined && vc - gd > 0.5 && gd < 0.25;
+    };
+    return {
+      sim,
+      setI2cPins(sda, scl) { sim.i2c.setBus(netOf(sda), netOf(scl)); sim._i2cNames = [sda, scl]; },
+      i2cWrite(addr, bytes, stop) { return sim.i2c.txn(addr, bytes, stop); },
+      i2cRead(addr, n) { return sim.i2c.rxn(addr, n); },
+      dhtRead(name, type) {
+        const hit = partsOn(netOf(name)).find((m) => (partById(m.id)?.type === 'wokwi-dht22' && m.pin === 'SDA') || (partById(m.id)?.type === 'mod-dht11' && m.pin === 'DATA'));
+        if (!hit) { sim.warn(`dht-none-${name}`, `DHT: tidak ada sensor DHT yang pin datanya terhubung ke ${name}.`); return null; }
+        const p = partById(hit.id);
+        if (!powered(p.id, ['VCC'], ['GND'])) { sim.warn(`dht-pw-${p.id}`, `${p.id}: tidak mendapat daya. Hubungkan VCC ke 3V3/5V dan GND ke GND.`); return null; }
+        const real = p.type === 'mod-dht11' ? 11 : 22;
+        if (type !== real && !(type === 21 && real === 22)) sim.warn(`dht-type-${p.id}`, `${p.id} adalah DHT${real}, tetapi kode memakai DHT${type}. Pembacaan sensor asli akan salah; ubah tipe di kode.`);
+        return { t: +(p.attrs?.temperature ?? 28), h: +(p.attrs?.humidity ?? 65) };
+      },
+      pulseIn(name, state, timeout) {
+        const hit = partsOn(netOf(name)).find((m) => ['wokwi-hc-sr04', 'mod-jsn-sr04t'].includes(partById(m.id)?.type) && m.pin === 'ECHO');
+        if (!hit) return 0;
+        const p = partById(hit.id);
+        if (!powered(p.id, ['VCC'], ['GND'])) { sim.warn(`hc-pw-${p.id}`, `${p.id}: tidak mendapat daya (butuh 5 V).`); return 0; }
+        const trigNet = sim.circuit.net(p.id, 'TRIG');
+        if (!Object.values(sim.ardNets).includes(trigNet)) { sim.warn(`hc-trig-${p.id}`, `${p.id}: pin TRIG belum terhubung ke mikrokontroler.`); return 0; }
+        if (!state) return 0;
+        const us = Math.max(2, Math.min(450, +(p.attrs?.distance ?? 100))) * 58.2;
+        return us > timeout ? 0 : us;
+      },
+      pushPixels(name, bytes) {
+        const net = netOf(name);
+        const st = sim.pixelChains.find((c) => sim.circuit.net(c.chain[0]._part.id, 'DIN') === net);
+        if (!st) { sim.warn(`px-none-${name}`, `NeoPixel: tidak ada LED NeoPixel yang DIN-nya terhubung ke ${name}.`); return; }
+        st.bytes = [...bytes]; sim._flushPixels(st);
+      },
+      async http(method, url, headers, body, timeout) {
+        const hdr = {}; for (const line of headers.split('\n')) { const i = line.indexOf(':'); if (i > 0) hdr[line.slice(0, i).trim()] = line.slice(i + 1).trim(); }
+        const go = async (u) => { const ac = new AbortController(); const t = setTimeout(() => ac.abort(), Math.max(1000, timeout || 5000)); try { const r = await fetch(u, { method, headers: hdr, body: body && method !== 'GET' ? body : undefined, signal: ac.signal }); return { status: r.status, bytes: new Uint8Array(await r.arrayBuffer()) }; } finally { clearTimeout(t); } };
+        sim.emit('net', { method, url });
+        try { return await go(url); }
+        catch (e) {
+          if (e.name === 'AbortError') { sim.warn('http-timeout:' + url, `HTTP ${method} ${url}: waktu habis.`); return { status: -11, bytes: new Uint8Array(0) }; }
+          if (sim.proxyUrl) {
+            try {
+              const r = await go(sim.proxyUrl + encodeURIComponent(url));
+              if (r.status === 403) sim.warn('http-proxy:' + new URL(url).hostname, `HTTP ${url}: situs menolak akses dari browser (CORS) dan tidak ada di daftar proxy simulator.`);
+              else if (!(sim._viaProxy ||= new Set()).has(new URL(url).hostname) && sim._viaProxy.add(new URL(url).hostname)) sim.info(`(lewat proxy simulator karena ${new URL(url).hostname} tidak mengizinkan akses langsung dari browser)`);
+              return r;
+            } catch { /* fall through */ }
+          }
+          sim.warn('http-fail:' + url, `HTTP ${method} ${url} gagal (tidak ada internet, alamat salah, atau situs menolak akses dari browser/CORS).`);
+          return { status: -1, bytes: new Uint8Array(0) };
+        }
+      },
+      get net() { return sim.net; },
+      camFrame() { return sim.cameraFrame || null; },   // {bytes: JPEG Uint8Array, w, h} set by the UI (device camera / uploaded photo)
+      btBegin(name) { sim.emit('bt', { type: 'begin', name }); },
+      btOut(bytes) { sim.emit('bt', { type: 'data', bytes }); },
+      nvs(op, key, buf, len) {
+        const K = 'sim.nvs.' + key; let store;
+        try { store = globalThis.localStorage; } catch { store = null; }
+        const mem = (sim._nvs ||= {});
+        const get = () => (store ? store.getItem(K) : mem[K] ?? null), set = (x) => (store ? store.setItem(K, x) : (mem[K] = x));
+        if (op === 0) { const x = get(); if (x === null) return -1; const b = Uint8Array.from(atob(x), (c) => c.charCodeAt(0)); if (buf && len > 0) buf.set(b.subarray(0, len)); return b.length; }
+        if (op === 1) { let s = ''; for (const c of buf.subarray(0, len)) s += String.fromCharCode(c); set(btoa(s)); return len; }
+        if (op === 2) { if (store) store.removeItem(K); else delete mem[K]; return 0; }
+        if (op === 3) { if (store) for (const k of Object.keys(store)) { if (k.startsWith(K + '/')) store.removeItem(k); } return 0; }
+        return -1;
+      },
     };
   }
 
@@ -78,15 +168,28 @@ export class Simulator {
     const boardPart = anyBoard && BY_TAG[anyBoard.type].sim === 'full' ? anyBoard : null;
     this.boardPart = boardPart; this.designBoard = boardPart ? null : anyBoard || null;
     this.i2c.clear();
+    // pick the execution engine: AVR emulator, or the WebAssembly Arduino runtime (ESP32 / ESP8266 / RP2040)
+    const bcat = boardPart ? BY_TAG[boardPart.type] : null;
+    if (bcat?.runtime === 'wasm') {
+      this.board = new WasmBoard(bcat.wasm, bcat.gpio, this._wasmHost()); this._bindBoard(this.board);
+      this.net = new NetGateway(this.gatewayUrl || '', (lvl, t) => (lvl === 'warn' ? this.warn('gw:' + t, t) : this.info(t)));
+    }
+    else { this.board = this.avr; }
+    const I2C_DEFAULT = { avr: [12, 13], esp32: [21, 22], esp8266: [4, 5], rp2040: [4, 5] };
 
     // Arduino pin nets + rails
     this.ardNets = {}; this.rails = [];
     if (boardPart) {
-      for (const name of Object.keys(PIN_MAP)) {
+      for (const name of Object.keys(this.board.pinMap)) {
         const n = this.circuit.net(boardPart.id, name);
         if (n >= 0) this.ardNets[name] = n;
       }
     }
+    // default I2C pins of the board (Wire.begin(sda, scl) can change them on ESP32/ESP8266/RP2040)
+    if (this.board.kind === 'avr') this.i2cDefaultPins = ['A4', 'A5'];
+    else { const [sd, sc] = I2C_DEFAULT[this.board.kind]; this.i2cDefaultPins = [this.board.gpioToName[sd], this.board.gpioToName[sc]]; }
+    this.i2c.setBus(this.ardNets[this.i2cDefaultPins[0]] ?? -1, this.ardNets[this.i2cDefaultPins[1]] ?? -1);
+    this._i2cNames = this.i2cDefaultPins;
     // power rails of whichever board is present (runnable or design-only): powers sensors, LEDs, modules
     if (anyBoard) {
       const el = els.get(anyBoard.id), power = BY_TAG[anyBoard.type].power || {};
@@ -142,6 +245,7 @@ export class Simulator {
     this.behaviors = [];
     this.audio.stopAll();
     this.board.clearListeners();
+    this.net?.dispose(); this.net = null;
     this.pixelChains = [];
   }
 
@@ -220,18 +324,20 @@ export class Simulator {
   }
 
   pushInputs(sol) {
-    for (const [name, m] of Object.entries(PIN_MAP)) {
+    const th = this.board.inputThreshold ?? 0.5;
+    for (const [name, m] of Object.entries(this.board.pinMap)) {
       const net = this.ardNets[name];
-      if (m.adc !== undefined) {
+      if (m.adc !== undefined && m.adc !== false) {
         const v = net !== undefined ? sol.v(net) : null;
-        this.board.adc.channelValues[m.adc] = (v ?? 0) * 5;
+        this.board.setAnalog(name, (v ?? 0) * 5);
       }
       if (!m.port || this.board.driveLevel(name) !== null) continue;
       if (net === undefined) { this.board.setInput(name, this.board.isPullup(name)); continue; }
       const v = sol.v(net);
-      this.board.setInput(name, v === null ? this.board.isPullup(name) : v > 0.5);
+      this.board.setInput(name, v === null ? this.board.isPullup(name) : v > th);
     }
   }
+  i2cPinText() { const [a, b] = this._i2cNames || ['A4', 'A5']; return `SDA→${a} / SCL→${b}`; }
 
   resolveNow() {
     if (!this.circuit) return;
@@ -246,6 +352,16 @@ export class Simulator {
   }
 
   // ------------------------------------------------------------------ control
+  async loadWasm(bytes) {
+    await this.board.loadWasm(bytes);
+    this.hexText = 'wasm';
+    this.warned = new Set();
+    for (const b of this.behaviors) b.reset?.();
+    this.resolveNow();
+  }
+
+  btWrite(text) { this.board.btWrite?.(text); }
+
   loadHex(text) {
     this.board.loadHex(text);
     this.hexText = text;
@@ -287,6 +403,7 @@ export class Simulator {
   frame(dtMs) {
     const b = this.board;
     const slices = Math.max(1, Math.ceil(dtMs / 4));
+    b.deadline = performance.now() + 14;   // wall-clock budget for the whole frame (WebAssembly boards)
     for (let i = 0; i < slices; i++) {
       b.run((dtMs / slices) * (CLOCK_HZ / 1000) * this.speed);
       this.resolveNow();

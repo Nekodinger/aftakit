@@ -19,6 +19,7 @@ PIN_MAP['A7'] = { port: null, bit: -1, adc: 7 };
 
 export class AvrBoard {
   constructor() {
+    this.kind = 'avr'; this.pinMap = PIN_MAP; this.inputThreshold = 0.5;
     this.hexSize = 0;
     this.pins = {};
     this.edgeListeners = {}; // pinName -> [fn(level, cycles)]
@@ -121,6 +122,7 @@ export class AvrBoard {
     this.usart.onByteTransmit = (b) => this.serialListeners.forEach((f) => f(b));
   }
 
+  setAnalog(name, volts) { const m = PIN_MAP[name]; if (m && m.adc !== undefined) this.adc.channelValues[m.adc] = volts; }
   serialWrite(code) { this.usart.writeByte(code); }
 
   run(cycles) {

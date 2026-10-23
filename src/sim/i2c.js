@@ -6,28 +6,53 @@ const bcd = (n) => ((Math.floor(n / 10) << 4) | (n % 10)) & 255;
 const unbcd = (b) => (b >> 4) * 10 + (b & 15);
 
 export class I2CBus {
-  constructor(sim) { this.sim = sim; this.devices = new Map(); this.cur = null; this.write = false; this.log = []; }
+  constructor(sim) { this.sim = sim; this.devices = []; this.cur = null; this.write = false; this.busNets = null; }
   attach(twi) { this.twi = twi; twi.eventHandler = this; }
-  add(addr, dev) {
-    if (this.devices.has(addr)) this.sim.warn(`i2c-dup-${addr}`, `Dua perangkat I2C memakai alamat yang sama 0x${addr.toString(16)} (${this.devices.get(addr).label} dan ${dev.label}). Ubah alamat salah satunya.`);
-    this.devices.set(addr, dev);
+  // nets: { sda, scl } of the device pins (devices on other nets do not answer)
+  add(addr, dev, nets) {
+    const same = this.devices.find((d) => d.addr === addr && d.nets.sda === nets.sda);
+    if (same) this.sim.warn(`i2c-dup-${addr}`, `Dua perangkat I2C memakai alamat yang sama 0x${addr.toString(16)} (${same.dev.label} dan ${dev.label}). Ubah alamat salah satunya.`);
+    this.devices.push({ addr, dev, nets });
   }
-  clear() { this.devices.clear(); this.cur = null; }
-  // ---- TWIEventHandler
+  setBus(sdaNet, sclNet) { this.busNets = { sda: sdaNet, scl: sclNet }; }
+  clear() { this.devices = []; this.cur = null; this.warnedScan = new Set(); }
+  find(addr) {
+    const cands = this.devices.filter((d) => d.addr === addr);
+    const b = this.busNets;
+    const hit = cands.find((d) => b && d.nets.sda === b.sda && d.nets.scl === b.scl && b.sda >= 0);
+    if (hit) return hit.dev.ready() ? hit.dev : null;
+    if (!(this.warnedScan ||= new Set()).has(addr)) {
+      this.warnedScan.add(addr);
+      const pins = this.sim.i2cPinText?.() || 'SDA→A4 / SCL→A5';
+      if (cands.length) this.sim.warn(`i2c-wire-${addr}`, `I2C: ${cands[0].dev.label} (0x${addr.toString(16)}) tidak terhubung ke jalur I2C yang dipakai program (${pins}). Periksa kabel SDA/SCL.`);
+      else this.sim.warn(`i2c-miss-${addr}`, `I2C: tidak ada perangkat yang menjawab di alamat 0x${addr.toString(16).padStart(2, '0')}. Periksa alamat, kabel ${pins}, dan daya modul.`);
+    }
+    return null;
+  }
+  // ---- TWIEventHandler (ATmega328P)
   start() { this.twi.completeStart(); }
   stop() { this.cur?.stop?.(); this.cur = null; this.twi.completeStop(); }
   connectToSlave(addr, write) {
-    const d = this.devices.get(addr);
-    this.cur = d && d.ready() ? d : null; this.write = write;
+    this.cur = this.find(addr); this.write = write;
     if (this.cur) this.cur.begin?.(write);
-    else if (!this.warnedScan?.has(addr)) {
-      (this.warnedScan ||= new Set()).add(addr);
-      if (this.devices.size || addr !== 0) this.sim.warn(`i2c-miss-${addr}`, `I2C: tidak ada perangkat yang menjawab di alamat 0x${addr.toString(16).padStart(2, '0')}. Periksa alamat, kabel SDA→A4 / SCL→A5, dan daya modul.`);
-    }
     this.twi.completeConnect(!!this.cur);
   }
   writeByte(v) { const ok = this.cur ? this.cur.write(v) !== false : false; this.twi.completeWrite(ok); }
   readByte() { this.twi.completeRead(this.cur ? this.cur.read() & 255 : 0xff); }
+  // ---- transaction API (WebAssembly boards): returns Wire.endTransmission() codes
+  txn(addr, bytes, stop) {
+    const d = this.find(addr); if (!d) return 2;
+    d.begin?.(true);
+    for (const b of bytes) if (d.write(b) === false) return 3;
+    if (stop) d.stop?.();
+    return 0;
+  }
+  rxn(addr, n) {
+    const d = this.find(addr); if (!d) return new Uint8Array(0);
+    d.begin?.(false); const out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) out[i] = d.read() & 255;
+    d.stop?.(); return out;
+  }
 }
 
 // ------------------------------------------------------------------ PCF8574 + HD44780 (LiquidCrystal_I2C)

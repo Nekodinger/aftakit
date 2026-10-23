@@ -14,7 +14,8 @@
   "dependencies": {
     "@supabase/supabase-js": "2.118.0",
     "@wokwi/elements": "1.9.2",
-    "avr8js": "0.21.1"
+    "avr8js": "0.21.1",
+    "jpeg-js": "0.4.4"
   },
   "devDependencies": {
     "vite": "6.4.5"

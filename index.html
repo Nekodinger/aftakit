@@ -28,6 +28,7 @@
     <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 10h16M4 15h16M10 4v16M15 4v16" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-parts" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="13" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="4" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.5 13v7M13 16.5h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-lib" viewBox="0 0 24 24"><path d="M5 4h3v16H5zM10 4h3v16h-3zM15.2 4.6l2.9-.8 4 15.5-2.9.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
     <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="19" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6" stroke="currentColor" stroke-width="2"/></symbol>
@@ -89,6 +90,7 @@
         <button class="rail-btn" data-panel="examples"><svg><use href="#i-book"/></svg><span>Contoh</span></button>
         <button class="rail-btn" data-panel="check"><svg><use href="#i-check"/></svg><span>Periksa</span><i class="rail-badge" id="checkBadge" hidden></i></button>
         <button class="rail-btn" data-panel="props"><svg><use href="#i-sliders"/></svg><span>Properti</span></button>
+        <button class="rail-btn" data-panel="libs"><svg><use href="#i-lib"/></svg><span>Library</span><i class="rail-badge" id="libBadge" hidden></i></button>
       </nav>
 
       <aside id="leftPanel" aria-label="Panel kiri">
@@ -105,6 +107,20 @@
           <div id="checkList" class="scroll"><div class="prop-empty">Tekan "Periksa sekarang" untuk mengecek daya, korsleting, pin 3.3 V/5 V, pin khusus ESP32, I2C, dan lainnya.</div></div>
         </section>
         <section class="lp" data-lp="props" hidden><div class="lp-head"><b>Properti</b></div><div id="propsBody" class="scroll"></div></section>
+        <section class="lp" data-lp="libs" hidden>
+          <div class="lp-head"><b>Library</b><span class="muted small">ESP32 · ESP8266 · Pico</span></div>
+          <div class="scroll lib-body">
+            <h5>Otomatis dari Arduino Library Manager</h5>
+            <p class="muted small">Tulis saja <code>#include &lt;NamaLibrary.h&gt;</code>. Library resmi (Blynk, PubSubClient, UniversalTelegramBot, ThingSpeak, FastLED, …) diunduh dan dikompilasi otomatis oleh server, seperti di Wokwi / Arduino IDE.</p>
+            <h5>Library dari file .zip <span class="muted small">(mis. ekspor Edge Impulse)</span></h5>
+            <div id="libList"></div>
+            <button class="btn" id="libAdd" type="button">+ Tambah library .zip</button>
+            <input type="file" id="libFile" accept=".zip,application/zip" hidden />
+            <p class="muted small">Edge Impulse Studio → Deployment → <b>Arduino library</b> → Build, lalu unggah .zip-nya di sini. File disimpan di perangkat ini dan dikirim ke server kompilasi sekali saja.</p>
+            <h5>Jaringan IoT (gateway)</h5>
+            <p class="muted small" id="gwInfo"></p>
+          </div>
+        </section>
         <button class="lp-close icon-btn" id="lpClose" title="Tutup panel"><svg><use href="#i-close"/></svg></button>
       </aside>
 
@@ -185,6 +201,8 @@
           <div class="pane-head tabs">
             <button class="tab on" data-tab="log">Log <span class="badge" id="logBadge" hidden>0</span></button>
             <button class="tab" data-tab="serial">Serial Monitor <span class="badge dot" id="serialBadge" hidden></span></button>
+            <button class="tab" data-tab="bt" id="tabBt" hidden>Bluetooth <span class="badge dot" id="btBadge" hidden></span></button>
+            <button class="tab" data-tab="cam" id="tabCam" hidden>Kamera</button>
             <span class="grow"></span>
             <button class="mini" id="logClear" title="Bersihkan">Bersihkan</button>
             <button class="mini" id="consoleToggle" title="Perkecil/Perbesar konsol"><svg><use href="#i-chev"/></svg></button>
@@ -194,6 +212,25 @@
             <pre id="serialOut" class="scroll" aria-live="off"></pre>
             <form id="serialForm"><input id="serialIn" placeholder="Kirim ke Serial (Enter)" autocomplete="off" /><select id="serialEol" aria-label="Akhiran baris"><option value="">Tanpa akhiran</option><option value="\n" selected>Newline</option><option value="\r\n">CR + LF</option></select><button class="btn" type="submit">Kirim</button></form>
           </div>
+          <div id="btPane" hidden>
+            <div class="bt-head"><span class="dot" id="btDot"></span><span id="btName">Bluetooth belum aktif (program memanggil BT.begin)</span></div>
+            <pre id="btOut" class="scroll" aria-live="off"></pre>
+            <form id="btForm"><input id="btIn" placeholder="Kirim dari HP ke ESP32 (Enter)" autocomplete="off" /><span class="bt-quick"><button type="button" class="mini" data-bt="ON">ON</button><button type="button" class="mini" data-bt="OFF">OFF</button></span><button class="btn" type="submit">Kirim</button></form>
+          </div>
+          <div id="camPane" hidden>
+            <div class="cam-src">
+              <span class="muted small">Sumber gambar ESP32-CAM:</span>
+              <label class="seg"><input type="radio" name="camSrc" value="sample" checked /> Gambar contoh</label>
+              <label class="seg"><input type="radio" name="camSrc" value="device" /> Kamera perangkat</label>
+              <label class="seg"><input type="radio" name="camSrc" value="photo" /> Foto</label>
+              <input type="file" id="camFile" accept="image/*" hidden />
+              <span class="muted small" id="camStatus"></span>
+            </div>
+            <div class="cam-views">
+              <figure><video id="camVideo" playsinline muted hidden></video><img id="camSample" alt="Gambar contoh" /><figcaption>Pratinjau sumber</figcaption></figure>
+              <figure><img id="camShot" alt="" /><figcaption id="camShotInfo">Foto terakhir (esp_camera_fb_get)</figcaption></figure>
+            </div>
+          </div>
         </section>
       </section>
     </main>
@@ -201,8 +238,8 @@
 
   <dialog id="dlgShare"><form method="dialog"><h3>Bagikan simulasi</h3><p id="shareMsg"></p><div class="copyrow"><input id="shareUrl" readonly /><button type="button" class="btn" id="shareCopy">Salin</button></div><p class="muted small" id="shareNote"></p><menu><button class="btn">Tutup</button></menu></form></dialog>
   <dialog id="dlgSettings"><form method="dialog"><h3>Pengaturan kompilator</h3>
-    <p class="muted small">Sketch Arduino Uno/Nano dikompilasi di server (avr-gcc + core Arduino + library). Contoh bawaan yang tidak diubah selalu berjalan tanpa server.</p>
-    <label>URL kompilator<input id="setUrl" placeholder="https://…/build" /></label>
+    <p class="muted small">Kode sendiri dikompilasi di server: Uno/Nano dengan avr-gcc, ESP32/ESP8266/Pico ke WebAssembly (clang). Contoh bawaan yang tidak diubah selalu berjalan tanpa server. Server gratis: Hugging Face Space (Docker) dari folder <code>server/</code>.</p>
+    <label>URL kompilator<input id="setUrl" placeholder="https://nama-space.hf.space" /></label>
     <p class="muted small" id="setStatus"></p>
     <menu><button class="btn" value="cancel">Batal</button><button class="btn" id="setTest" type="button">Tes koneksi</button><button class="btn primary" id="setSave" value="ok">Simpan</button></menu></form></dialog>
   <dialog id="dlgHelp"><form method="dialog"><h3 id="helpTitle">Cara pakai</h3><div id="helpBody" class="help"></div><menu><button class="btn primary">Mengerti</button></menu></form></dialog>

@@ -18,7 +18,7 @@ const WOKWI = [
   // ---- boards
   { tag: 'wokwi-arduino-uno', name: 'Arduino Uno R3', cat: 'Mikrokontroler', sim: 'full', board: 'uno', mcu: 'ATmega328P', keywords: 'atmega328p uno r3 arduino', power: { '5V': 5, '3.3V': 3.3 } },
   { tag: 'wokwi-arduino-nano', name: 'Arduino Nano', cat: 'Mikrokontroler', sim: 'full', board: 'nano', mcu: 'ATmega328P', keywords: 'atmega328p nano arduino', power: { '5V': 5, '3.3V': 3.3 } },
-  { tag: 'wokwi-esp32-devkit-v1', name: 'ESP32 DevKit V1 (DOIT, 30 pin)', cat: 'Mikrokontroler', sim: 'design', board: 'esp32', mcu: 'ESP32', keywords: 'esp32 wifi bluetooth doit devkit iot', gpio: ESP32_DEVKIT_GPIO, power: { VIN: 5, '3V3': 3.3 } },
+  { tag: 'wokwi-esp32-devkit-v1', name: 'ESP32 DevKit V1 (DOIT, 30 pin)', cat: 'Mikrokontroler', sim: 'full', runtime: 'wasm', wasm: 'esp32', board: 'esp32', mcu: 'ESP32', keywords: 'esp32 wifi bluetooth doit devkit iot', gpio: ESP32_DEVKIT_GPIO, power: { VIN: 5, '3V3': 3.3 } },
   { tag: 'wokwi-arduino-mega', name: 'Arduino Mega 2560', cat: 'Mikrokontroler', sim: 'design', board: 'mega', mcu: 'ATmega2560', keywords: 'mega 2560 arduino', power: { '5V': 5, '3.3V': 3.3 } },
   { tag: 'wokwi-nano-rp2040-connect', name: 'Arduino Nano RP2040 Connect', cat: 'Mikrokontroler', sim: 'design', board: 'rp2040', mcu: 'RP2040', keywords: 'rp2040 nano wifi' },
   { tag: 'wokwi-franzininho', name: 'Franzininho (ATtiny85)', cat: 'Mikrokontroler', sim: 'visual', keywords: 'attiny85' },
@@ -97,7 +97,7 @@ const WOKWI = [
   { tag: 'wokwi-biaxial-stepper', name: 'Stepper Biaxial (gauge)', cat: 'Aktuator', sim: 'visual', keywords: 'gauge' },
 ];
 
-const MODULES = MODULE_SPECS.map((s) => ({ tag: s.tag, name: s.name, cat: s.cat, sim: s.sim, board: s.board, mcu: s.mcu, keywords: s.keywords || '',
+const MODULES = MODULE_SPECS.map((s) => ({ tag: s.tag, name: s.name, cat: s.cat, sim: s.sim, board: s.board, mcu: s.mcu, keywords: s.keywords || '', runtime: s.runtime, wasm: s.wasm,
   props: s.props, gpio: s.gpio, power: s.power, outs: s.outs, logic: s.logic, module: true }));
 
 export const CATALOG = [...WOKWI, ...MODULES];

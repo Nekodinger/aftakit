@@ -10,15 +10,17 @@ function i2cPart(ctx, { vcc, gnd, sda = 'SDA', scl = 'SCL', make, addr }) {
   return {
     attach() {
       const sim = ctx.sim; dev = make(); ctx.dev = dev;
-      const okSda = ctx.ardPins(sda).some((p) => p === 'A4'), okScl = ctx.ardPins(scl).some((p) => p === 'A5');
-      wired = okSda && okScl;
       if (!sim.boardPart) return;
-      if (!wired) {
-        const miss = [!okSda && `${sda} → A4`, !okScl && `${scl} → A5`].filter(Boolean).join(', ');
-        sim.warn(`i2c-wire-${ctx.part.id}`, `${ctx.label}: jalur I2C belum benar (${miss}). Pada Uno/Nano, SDA = A4 dan SCL = A5.`);
-        return;
+      const bus = sim.i2cDefaultPins || ['A4', 'A5'];
+      if (sim.board.kind === 'avr') {   // fixed TWI pins on the ATmega328P: tell the student right away
+        const okSda = ctx.ardPins(sda).includes(bus[0]), okScl = ctx.ardPins(scl).includes(bus[1]);
+        wired = okSda && okScl;
+        if (!wired) {
+          const miss = [!okSda && `${sda} → ${bus[0]}`, !okScl && `${scl} → ${bus[1]}`].filter(Boolean).join(', ');
+          sim.warn(`i2c-wire-${ctx.part.id}`, `${ctx.label}: jalur I2C belum benar (${miss}). Pada Uno/Nano, SDA = A4 dan SCL = A5.`);
+        }
       }
-      sim.i2c.add(addr(), dev);
+      sim.i2c.add(addr(), dev, { sda: ctx.n(sda), scl: ctx.n(scl) });
     },
     drivers2(v) { if (dev) dev.powered = powered(v); return []; },
     pullups: () => [ctx.n(sda), ctx.n(scl)],

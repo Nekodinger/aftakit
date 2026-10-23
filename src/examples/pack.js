@@ -12,3 +12,15 @@ export async function exampleHexText(id) {
   let s = ''; for (const x of flash.subarray(it.off, it.off + it.len)) s += String.fromCharCode(x);
   return { hex: b64ToHex(btoa(s)), info: it.info };
 }
+
+// ESP32 / ESP8266 examples: precompiled WebAssembly modules in public/wasm, fetched only when used
+import WASM from './wasm.json';
+export const hasExampleWasm = (id) => !!WASM[id];
+export function exampleWasm(id) {
+  const it = WASM[id]; if (!it) return null;
+  return { board: it.board, wasm: async () => {
+    const r = await fetch(import.meta.env.BASE_URL + it.file);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return new Uint8Array(await r.arrayBuffer());
+  } };
+}
