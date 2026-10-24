@@ -333,3 +333,10 @@ dialog label input { width: 100%; margin-top: 4px; background: var(--panel-2); b
 .lib-item b { display: block; font-size: 13px; overflow-wrap: anywhere; }
 .lib-item code { display: inline-block; margin-top: 2px; overflow-wrap: anywhere; }
 .lib-item .tag { display: inline-block; white-space: nowrap; font-size: 11px; color: #fff; background: #2f7cf6; border-radius: 4px; padding: 0 5px; margin: 2px 4px 0 0; }
+
+/* breadboard hole mode: "Geser" (drag the board) vs "Kabel" (start wires) */
+.bb-mode .bb-mode-l { font-size: 12px; font-weight: 600; color: var(--muted, #6b7385); padding: 0 4px 0 6px; }
+.bb-mode .tb span { font-size: 13px; }
+#viewport.bb-move .pinbox.bb .pin { cursor: move; }
+#viewport.bb-move .pinbox.bb .pin:hover { background: transparent; border-color: transparent; }
+@media (max-width: 900px) { .bb-mode .bb-mode-l { display: none; } }

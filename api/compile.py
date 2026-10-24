@@ -103,7 +103,7 @@ class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self._send(200, {"ok": True, "service": "arduino-compile (vercel)", "wasm": True, "gateway": True, "libs": bool(LIB_BASE),
-                         "boards": ["uno", "nano", "mega", "esp32", "esp8266", "rp2040", "nanorp2040"], "toolchain": "avr-gcc + wasi-sdk"})
+                         "boards": ["uno", "nano", "mega", "attiny85", "esp32", "esp8266", "rp2040", "nanorp2040"], "toolchain": "avr-gcc + wasi-sdk"})
 
     def do_POST(self):
         route = self._route()

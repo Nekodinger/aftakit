@@ -403,6 +403,14 @@ $('#tbUndo').onclick = () => canvas.undo(); $('#tbRedo').onclick = () => canvas.
 $('#tbRotL').onclick = () => canvas.rotateSelected(-1); $('#tbRotR').onclick = () => canvas.rotateSelected(1);
 $('#tbDup').onclick = () => { if (canvas.selected?.kind === 'part') canvas.duplicate(canvas.selected.id); };
 $('#tbDel').onclick = () => canvas.deleteSelected();
+// breadboard: choose what a tap on a hole does (prevents accidental wires when moving the board)
+const syncBbMode = () => { const m = canvas.bbMode; $('#bbMove').classList.toggle('on', m === 'move'); $('#bbWire').classList.toggle('on', m === 'wire'); };
+const syncBbGroup = () => { $('#bbModeGroup').hidden = !canvas.hasBreadboard(); };
+$('#bbMove').onclick = () => { canvas.setBbMode('move'); toast('Mode Geser: seret breadboard dari lubang mana pun. Kabel tidak akan dibuat.'); };
+$('#bbWire').onclick = () => { canvas.setBbMode('wire'); toast('Mode Kabel: ketuk lubang breadboard untuk membuat kabel.'); };
+canvas.on('bbmode', (m) => { syncBbMode(); try { localStorage.setItem('sim.bbMode', m); } catch { /* storage blocked */ } });
+canvas.on('model', syncBbGroup); canvas.on('change', syncBbGroup);
+try { if (localStorage.getItem('sim.bbMode') === 'move') canvas.setBbMode('move'); } catch { /* storage blocked */ }
 $('#tbGrid').onclick = () => { canvas.snap = canvas.snap === 5 ? 1 : 5; $('#tbGrid').classList.toggle('on', canvas.snap === 5); toast(canvas.snap === 5 ? 'Jepret ke grid aktif' : 'Jepret ke grid nonaktif'); };
 $('#zoomIn').onclick = () => canvas.zoomAt(1.2); $('#zoomOut').onclick = () => canvas.zoomAt(1 / 1.2); $('#zoomFit').onclick = () => canvas.fit();
 for (const id of ['#tbRotL', '#tbRotR', '#tbDup', '#tbDel']) $(id).disabled = true;

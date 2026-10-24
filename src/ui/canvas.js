@@ -25,6 +25,7 @@ export class CircuitCanvas {
     this.parts = new Map(); this.wires = []; this.handlers = {};
     this.pan = { x: 40, y: 40 }; this.zoom = 1; this.snap = 5;
     this.selected = null; this.pending = null; this.colorIdx = 0; this.interactive = false; this.nextWire = 1;
+    this.bbMode = 'wire';   // breadboard holes: 'wire' starts a wire, 'move' drags the breadboard (no accidental wires)
     this.history = []; this.hpos = -1; this._restoring = false;
     this.pinTip = document.createElement('div'); this.pinTip.className = 'pin-tip'; this.pinTip.hidden = true; this.pinLayer.append(this.pinTip);
     this.ghost = document.createElementNS(SVGNS, 'path'); this.ghost.setAttribute('class', 'wire ghost'); this.ghost.style.display = 'none'; this.wiresSvg.append(this.ghost);
@@ -348,6 +349,7 @@ export class CircuitCanvas {
       if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return;
       const sel = this.selected; const mod = e.ctrlKey || e.metaKey;
       if (e.key === 'Escape') { this.cancelWire(); this.select(null); }
+      else if (e.key.toLowerCase() === 'b' && !mod) { this.setBbMode(this.bbMode === 'wire' ? 'move' : 'wire'); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); this.deleteSelected(); }
       else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? this.redo() : this.undo(); }
       else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); this.redo(); }
@@ -382,7 +384,15 @@ export class CircuitCanvas {
       // fingers are imprecise: snap a touch to the nearest pin within ~16 screen px
       const pinEl = e.pointerType === 'touch' ? this._nearestPinEl(e.clientX, e.clientY, 16) || e.target.closest?.('.pin') : e.target.closest?.('.pin');
       const partEl = e.target.closest?.('.part');
-      if (pinEl && e.button === 0 && !(this.interactive && !this.pending && partEl)) { e.preventDefault(); this._pinDown(pinEl); this._showTip(pinEl); return; }
+      // "Geser" mode: a hole of a breadboard grabs the breadboard itself (unless a wire is waiting for its end point)
+      const bbHole = pinEl && !this.pending && this.bbMode === 'move' && isBB(this.parts.get(pinEl.dataset.pid)?.type) ? this.parts.get(pinEl.dataset.pid) : null;
+      if (bbHole && e.button === 0) {
+        this.select({ kind: 'part', id: bbHole.id }); vp.focus({ preventScroll: true }); this.pinTip.hidden = true;
+        const others = this.pluggedInto(bbHole.id).map((id) => this.parts.get(id)).filter(Boolean).map((p) => ({ p, l: p.left, t: p.top }));
+        drag = { part: bbHole, sx: e.clientX, sy: e.clientY, l: bbHole.left, t: bbHole.top, moved: false, others }; vp.setPointerCapture(e.pointerId);
+        e.preventDefault(); return;
+      }
+      if (pinEl && e.button === 0 && !(this.interactive && !this.pending && partEl)) { e.preventDefault(); this._pinDown(pinEl); if (this.pending) { this.pending.sx = e.clientX; this.pending.sy = e.clientY; } this._showTip(pinEl); return; }
       if (e.button === 1 || spaceDown || (!partEl && e.button === 0)) {
         if (!partEl && e.button === 0 && !spaceDown) { this.cancelWire(); this.select(null); this.pinTip.hidden = true; }
         pan = { sx: e.clientX, sy: e.clientY, px: this.pan.x, py: this.pan.y }; vp.setPointerCapture(e.pointerId); vp.classList.add('grabbing'); e.preventDefault(); return;
@@ -432,6 +442,10 @@ export class CircuitCanvas {
       if (this.pending?.dragging) {
         const pinEl = (e.pointerType === 'touch' && this._nearestPinEl(e.clientX, e.clientY, 16)) || document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.pin');
         if (pinEl && !(pinEl.dataset.pid === this.pending.pid && pinEl.dataset.pin === this.pending.pin)) this._pinDown(pinEl);
+        else if (this.pending && !pinEl && isBB(this.parts.get(this.pending.pid)?.type) && Math.hypot(e.clientX - (this.pending.sx ?? e.clientX), e.clientY - (this.pending.sy ?? e.clientY)) > 40) {
+          // dragged from a breadboard hole into empty space: the user most likely wanted to move the board
+          this.cancelWire(); this.emit('toast', { text: 'Ingin memindahkan breadboard? Pilih mode "Geser" di toolbar (atau tekan B), lalu seret dari lubang mana pun.' });
+        }
         else if (this.pending) this.pending.dragging = false;
       }
     };
@@ -470,6 +484,13 @@ export class CircuitCanvas {
     const w = this._addWire(a, ref);
     if (w) { this.select({ kind: 'wire', id: w.id }); this.emit('change', { structural: true }); }
   }
+  setBbMode(m) {
+    this.bbMode = m === 'move' ? 'move' : 'wire';
+    this.viewport.classList.toggle('bb-move', this.bbMode === 'move');
+    if (this.bbMode === 'move') this.cancelWire();
+    this.emit('bbmode', this.bbMode);
+  }
+  hasBreadboard() { for (const p of this.parts.values()) if (isBB(p.type)) return true; return false; }
   cancelWire() {
     this.pending = null; this.ghost.style.display = 'none'; this.wireHint.hidden = true;
     this.pinLayer.querySelectorAll('.pin.active').forEach((d) => d.classList.remove('active'));
