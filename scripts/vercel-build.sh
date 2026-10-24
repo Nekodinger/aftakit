@@ -33,7 +33,7 @@ for r in arduino/ArduinoCore-avr arduino-libraries/Servo arduino-libraries/Liqui
          PaulStoffregen/OneWire milesburton/Arduino-Temperature-Control-Library avishorp/TM1637 bogde/HX711 \
          adafruit/Adafruit_BMP280_Library adafruit/Adafruit_BME280_Library sparkfun/SparkFun_MAX3010x_Sensor_Library \
          wayoda/LedControl MajicDesigns/MD_MAX72XX MajicDesigns/MD_Parola adafruit/Adafruit_ILI9341 arduino-libraries/SD miguelbalboa/rfid SpenceKonde/ATTinyCore nRF24/RF24 sandeepmistry/arduino-LoRa mikalhart/TinyGPSPlus Arduino-IRremote/Arduino-IRremote \
-         pololu/vl53l0x-arduino adafruit/Adafruit_VL53L0X budryerson/TFMini-Plus bmellink/IBusBM adafruit/Adafruit_MPU6050 rfetick/MPU6050_light; do
+         pololu/vl53l0x-arduino adafruit/Adafruit_VL53L0X budryerson/TFMini-Plus bmellink/IBusBM adafruit/Adafruit_MPU6050 rfetick/MPU6050_light GeorgK/MQ135 miguel5612/MQSensorsLib; do
   [ -d "$(basename $r)" ] || git clone -q --depth 1 "https://github.com/$r.git"
 done
 rm -rf */.git ATTinyCore/avr/bootloaders ATTinyCore/avr/extras

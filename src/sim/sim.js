@@ -9,6 +9,7 @@ import { BEHAVIORS2 } from './behaviors2.js';
 import { I2C_BEHAVIORS } from './i2cParts.js';
 import { DRONE_BEHAVIORS } from './drone.js';
 import { LIDAR_BEHAVIORS } from './lidar.js';
+import { GASFLEX_BEHAVIORS } from './gasflex.js';
 import { BEHAVIORS3 } from './behaviors3.js';
 import { BEHAVIORS4 } from './behaviors4.js';
 import { BEHAVIORS5 } from './behaviors5.js';
@@ -20,7 +21,7 @@ import { softSerialMonitor, attachPinI2C } from './pinbus.js';
 import { Audio } from './audio.js';
 import { BY_TAG } from '../catalog.js';
 
-const BEHAVIORS = { ...B1, ...BEHAVIORS2, ...BEHAVIORS3, ...BEHAVIORS4, ...BEHAVIORS5, ...BEHAVIORS6, ...I2C_BEHAVIORS, ...DRONE_BEHAVIORS, ...LIDAR_BEHAVIORS, 'mod-jsn-sr04t': B1['wokwi-hc-sr04'] };
+const BEHAVIORS = { ...B1, ...BEHAVIORS2, ...BEHAVIORS3, ...BEHAVIORS4, ...BEHAVIORS5, ...BEHAVIORS6, ...I2C_BEHAVIORS, ...DRONE_BEHAVIORS, ...LIDAR_BEHAVIORS, ...GASFLEX_BEHAVIORS, 'mod-jsn-sr04t': B1['wokwi-hc-sr04'] };
 // firmware that just idles (rjmp .-2): used when the circuit has no runnable microcontroller
 export const IDLE_HEX = ':02000000FFCF30\n:00000001FF\n';
 

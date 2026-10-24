@@ -603,6 +603,8 @@ const HINTS = {
   'mod-lipo': 'Baterai LiPo: pilih jumlah sel (3S = 11,1 V nominal, 12,6 V penuh), kapasitas dan C-rating. Tegangan turun saat arus besar dan saat isi berkurang.',
   'mod-vl53l0x': 'LIDAR ToF VL53L0X (I2C 0x29, 3–5 V): library VL53L0X (Pololu) atau Adafruit_VL53L0X. Jangkauan ±2 m.',
   'mod-tfluna': 'LIDAR TF-Luna: UART 115200, bingkai 9 byte 0x59 0x59 (jarak cm). Library TFMPlus. Jangkauan 0,2–8 m, daya 5 V.',
+  'mod-mq135': 'MQ-135 butuh 5 V (pemanas). AO = analog (naik bila udara kotor), DO = LOW di atas ambang. Pakai library MQUnifiedsensor (kalibrasi R0 di udara bersih, CO2 = hasil + 400) atau analogRead. Panaskan ±1 menit sebelum membaca.',
+  'mod-flex': 'Sensor flex: hambatan naik saat ditekuk (2.2": 25 kΩ datar → ±60 kΩ di 90°). Rangkai pembagi tegangan: 5V → flex → pin analog → resistor 47 kΩ → GND.',
   'mod-ftdi': 'Adaptor USB-Serial: terminal PC di tab USB-Serial. Silangkan TXD→RX dan RXD→TX, satukan GND. Baud terminal diatur di Properti; jumper 5V/3.3V. DTR→kapasitor→RESET untuk auto-reset.',
   'mod-hc05': 'SoftwareSerial bt(RX, TX); bt.begin(9600). Data muncul di tab Bluetooth. EN ke 5V saat menyala = mode AT (38400).',
   'mod-sim800l': 'AT command lewat Serial (9600). SMS: AT+CMGF=1, AT+CMGS="nomor", teks, lalu karakter 26 (Ctrl-Z). SMS & panggilan tampil di log.',

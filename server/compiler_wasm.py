@@ -32,6 +32,8 @@ CXXFLAGS = ["-std=gnu++17", "-fno-threadsafe-statics"] + COMMON
 INC = ["-I" + os.path.join(RT, "core"), "-I" + os.path.join(RT, "shim"), "-I" + os.path.join(RT, "ArduinoJson", "src")]
 # real third-party libraries compiled for the simulator (header -> source dir)
 LIBS = {
+    "MQ135.h": os.path.join(SRC, "MQ135"),
+    "MQUnifiedsensor.h": os.path.join(SRC, "MQSensorsLib", "src"),
     "VL53L0X.h": os.path.join(SRC, "vl53l0x-arduino"),
     "Adafruit_VL53L0X.h": os.path.join(SRC, "Adafruit_VL53L0X", "src"),
     "TFMPlus.h": os.path.join(SRC, "TFMini-Plus", "src"),
