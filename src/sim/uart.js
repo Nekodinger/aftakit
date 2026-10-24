@@ -59,7 +59,11 @@ export function uartLink(ctx, pins, dev) {
     sending = true; const b = q.shift(), t = T(), my = gen;
     setLevel(0);                                                         // start bit
     for (let k = 0; k < 8; k++) sim.after(Math.round((k + 1) * t), () => { if (my === gen) setLevel((b >> k) & 1); });
-    sim.after(Math.round(9 * t), () => { if (my === gen) { setLevel(1); for (const f of hwTargets()) f(b); } });
+    sim.after(Math.round(9 * t), () => {
+      if (my !== gen) return;
+      setLevel(1); for (const f of hwTargets()) f(b);
+      for (const l of sim.uart.links) if (l !== link && l.rxNet === txNet && txNet >= 0) l.receiveBytes([b], dev.baud());   // module -> module (e.g. FTDI <-> GPS)
+    });
     sim.after(Math.round(10 * t), () => { if (my === gen) pump(); });
   };
   // ---- MCU -> module, bit-banged: decode the waveform on the module's RX pin
@@ -67,6 +71,12 @@ export function uartLink(ctx, pins, dev) {
   let edges = [], start = -1;
   const decode = () => {
     const t = T(), at = (time) => { let l = 1; for (const [et, el] of edges) { if (et <= time) l = el; else break; } return l; };
+    if (at(start + 0.5 * t)) {                                            // false start bit (glitch, e.g. pinMode before the line idles HIGH)
+      const s0 = start; edges = edges.filter(([et]) => et > s0); start = -1;
+      const i = edges.findIndex(([, el]) => el === 0);
+      if (i >= 0) { edges = edges.slice(i); start = edges[0][0]; schedule(); } else edges = [];
+      return;
+    }
     let b = 0; for (let k = 0; k < 8; k++) b |= at(start + (k + 1.5) * t) << k;
     const stop = at(start + 9.5 * t);
     edges = edges.filter(([et]) => et > start + 9.5 * t); start = -1;

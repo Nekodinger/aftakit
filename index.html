@@ -207,6 +207,7 @@
             <button class="tab on" data-tab="log">Log <span class="badge" id="logBadge" hidden>0</span></button>
             <button class="tab" data-tab="serial">Serial Monitor <span class="badge dot" id="serialBadge" hidden></span></button>
             <button class="tab" data-tab="bt" id="tabBt" hidden>Bluetooth <span class="badge dot" id="btBadge" hidden></span></button>
+            <button class="tab" data-tab="ftdi" id="tabFtdi" hidden>USB-Serial <span class="badge dot" id="ftdiBadge" hidden></span></button>
             <button class="tab" data-tab="cam" id="tabCam" hidden>Kamera</button>
             <span class="grow"></span>
             <button class="mini" id="logClear" title="Bersihkan">Bersihkan</button>
@@ -221,6 +222,11 @@
             <div class="bt-head"><span class="dot" id="btDot"></span><span id="btName">Bluetooth belum aktif (program memanggil BT.begin)</span></div>
             <pre id="btOut" class="scroll" aria-live="off"></pre>
             <form id="btForm"><input id="btIn" placeholder="Kirim dari HP ke ESP32 (Enter)" autocomplete="off" /><span class="bt-quick"><button type="button" class="mini" data-bt="ON">ON</button><button type="button" class="mini" data-bt="OFF">OFF</button></span><button class="btn" type="submit">Kirim</button></form>
+          </div>
+          <div id="ftdiPane" hidden>
+            <div class="bt-head"><span class="dot on ftdi" id="ftdiDot"></span><span id="ftdiName">Terminal PC lewat adaptor USB-Serial (FTDI)</span><span class="grow"></span><select id="ftdiPort" aria-label="Port FTDI" hidden></select></div>
+            <pre id="ftdiOut" class="scroll" aria-live="off"></pre>
+            <form id="ftdiForm"><input id="ftdiIn" placeholder="Kirim dari PC lewat FTDI (Enter)" autocomplete="off" /><select id="ftdiEol" aria-label="Akhiran baris"><option value="">Tanpa akhiran</option><option value="\n" selected>Newline</option><option value="\r\n">CR + LF</option></select><button type="button" class="mini" id="ftdiDtr" title="Pulsa DTR LOW (auto-reset bila DTR → kapasitor → RESET)">Reset (DTR)</button><button class="btn" type="submit">Kirim</button></form>
           </div>
           <div id="camPane" hidden>
             <div class="cam-src">

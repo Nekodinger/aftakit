@@ -306,8 +306,14 @@ dialog label input { width: 100%; margin-top: 4px; background: var(--panel-2); b
 }
 
 /* ---- Bluetooth terminal + ESP32-CAM panes */
-#btPane, #camPane { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-#btPane[hidden], #camPane[hidden] { display: none; }
+#btPane, #camPane, #ftdiPane { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#btPane[hidden], #camPane[hidden], #ftdiPane[hidden] { display: none; }
+#ftdiOut { flex: 1; margin: 0; padding: 8px 10px; font: 12px/1.45 var(--mono, ui-monospace, monospace); white-space: pre-wrap; overflow: auto; min-height: 0; }
+#ftdiOut .me { color: #2f7cf6; }
+#ftdiForm { display: flex; gap: 6px; padding: 6px; border-top: 1px solid var(--line); }
+#ftdiForm input { flex: 1; min-width: 0; }
+.bt-head .dot.on.ftdi { background: #33d17a; box-shadow: 0 0 0 3px rgba(51, 209, 122, .2); }
+.bt-head .grow { flex: 1; }
 .bt-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
 .bt-head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .bt-head .dot.on { background: #2f7cf6; box-shadow: 0 0 0 3px rgba(47, 124, 246, .2); }

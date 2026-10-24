@@ -44,4 +44,14 @@ const has = (r, lvl, re) => r.some((x) => x.level === lvl && re.test(x.text));
   const r = run('wokwi-arduino-uno', UNO, [['r1', 'wokwi-resistor', ['1', '2']], ['led', 'wokwi-led', ['A', 'C']]], [['b:13', 'r1:1'], ['r1:2', 'led:A'], ['led:C', 'b:GND.1']]);
   ok(has(r, 'ok', /Tidak ditemukan kesalahan/), 'Uno: correct blink circuit -> no problems');
 }
+{
+  // FTDI: VCC is a USB-powered source (powers a GPS); 3.3 V jumper on the Uno 5 V rail is a short
+  const F = ['DTR', 'RXD', 'TXD', 'VCC', 'CTS', 'GND'];
+  const a = run('wokwi-arduino-uno', UNO, [['f', 'mod-ftdi', F], ['g', 'mod-gps', ['VCC', 'RX', 'TX', 'GND']]], [['f:VCC', 'g:VCC'], ['f:GND', 'g:GND'], ['f:RXD', 'g:TX'], ['f:GND', 'b:GND.1']]);
+  ok(!a.some((x) => /tidak mendapat tegangan|belum ke GND/.test(x.text)), `FTDI powers a module, no power warnings: ${a.map((x) => x.text).join(' | ')}`);
+  const b = run('wokwi-arduino-uno', UNO, [['f', 'mod-ftdi', F, { vio: '3.3V' }]], [['f:VCC', 'b:5V'], ['f:GND', 'b:GND.1']]);
+  ok(has(b, 'error', /Korsleting: VCC f \(3\.3 V/), 'FTDI 3.3 V jumper on the 5 V rail -> short error');
+  const c = run('wokwi-arduino-uno', UNO, [['f', 'mod-ftdi', F]], [['f:VCC', 'b:5V'], ['f:GND', 'b:GND.1']]);
+  ok(!c.some((x) => x.level === 'error'), 'FTDI 5 V on the 5 V rail is allowed');
+}
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS'); process.exit(fails ? 1 : 0);

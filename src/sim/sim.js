@@ -221,7 +221,7 @@ export class Simulator {
     }
 
     // behaviours
-    this._ow = null; this._air = null; this._ir = null; this.btModules = []; this._hostSvc = null;
+    this._ow = null; this._air = null; this._ir = null; this.btModules = []; this.ftdiPorts = []; this._hostSvc = null;
     this.behaviors = [];
     for (const p of model.parts) {
       const factory = BEHAVIORS[p.type];

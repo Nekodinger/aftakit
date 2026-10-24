@@ -84,7 +84,7 @@ function addLog(level, text, extra = {}) {
   if (level === 'error') { errCount++; const b = $('#logBadge'); b.hidden = false; b.textContent = errCount; if ($('#console').classList.contains('collapsed')) $('#console').classList.remove('collapsed'); }
 }
 $('#logList').addEventListener('click', (e) => { const a = e.target.closest('a.jump'); if (a) { setMode('code'); editor.goto(+a.dataset.line, +a.dataset.col); } });
-$('#logClear').onclick = () => { if (consoleTab === 'serial') { serialText = ''; $('#serialOut').textContent = ''; } else if (consoleTab === 'bt') $('#btOut').textContent = ''; else { $('#logList').textContent = ''; errCount = 0; $('#logBadge').hidden = true; } };
+$('#logClear').onclick = () => { if (consoleTab === 'serial') { serialText = ''; $('#serialOut').textContent = ''; } else if (consoleTab === 'bt') $('#btOut').textContent = ''; else if (consoleTab === 'ftdi') ftdiClear(); else { $('#logList').textContent = ''; errCount = 0; $('#logBadge').hidden = true; } };
 $('#consoleToggle').onclick = () => { $('#console').classList.toggle('collapsed'); requestAnimationFrame(() => canvas._applyView()); };
 sim.on('log', (l) => addLog(l.level, l.text, { t: l.t }));
 
@@ -121,9 +121,10 @@ function showConsole(name) {
   consoleTab = name;
   $$('[data-tab]').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
   $('#logList').hidden = name !== 'log'; $('#serialPane').hidden = name !== 'serial';
-  $('#btPane').hidden = name !== 'bt'; $('#camPane').hidden = name !== 'cam';
+  $('#btPane').hidden = name !== 'bt'; $('#camPane').hidden = name !== 'cam'; $('#ftdiPane').hidden = name !== 'ftdi';
   if (name === 'serial') $('#serialBadge').hidden = true;
   if (name === 'bt') $('#btBadge').hidden = true;
+  if (name === 'ftdi') $('#ftdiBadge').hidden = true;
 }
 $$('[data-tab]').forEach((b) => (b.onclick = () => { showConsole(b.dataset.tab); $('#console').classList.remove('collapsed'); }));
 const serialOut = $('#serialOut'); let serialText = '';
@@ -158,6 +159,37 @@ function btSend(text) {
 }
 $('#btForm').onsubmit = (e) => { e.preventDefault(); const i = $('#btIn'); if (i.value) btSend(i.value); i.value = ''; };
 $$('[data-bt]').forEach((b) => (b.onclick = () => btSend(b.dataset.bt)));
+// ------------------------------------------------------------------ USB-Serial (FTDI) terminal: the computer side of an FTDI adapter
+const ftdiOut = $('#ftdiOut'), ftdiDec = {};
+function ftdiAppend(text, mine, id) {
+  const multi = $('#ftdiPort').options.length > 1;
+  const sp = document.createElement('span'); if (mine) sp.className = 'me';
+  sp.textContent = text; ftdiOut.append(sp);
+  while (ftdiOut.childNodes.length > 1500) ftdiOut.firstChild.remove();
+  ftdiOut.scrollTop = ftdiOut.scrollHeight;
+  if (!mine && consoleTab !== 'ftdi') $('#ftdiBadge').hidden = false;
+  return multi && id;
+}
+function ftdiClear() { ftdiOut.textContent = ''; }
+let ftdiLastId = null;
+sim.on('ftdi', ({ id, b }) => {
+  const sel = $('#ftdiPort'); if (sel.options.length > 1 && sel.value !== id) return;      // several adapters: show the selected port
+  if (b === 13) return;
+  ftdiAppend((ftdiDec[id] ||= new TextDecoder()).decode(new Uint8Array([b]), { stream: true }), false, id); ftdiLastId = id;
+});
+const ftdiPort = () => { const ps = sim.ftdiPorts || []; return ps.find((p) => p.id === $('#ftdiPort').value) || ps[0]; };
+$('#ftdiForm').onsubmit = (e) => {
+  e.preventDefault(); const i = $('#ftdiIn');
+  if (!sim.running) { toast('Jalankan simulasi dulu untuk mengirim data lewat FTDI.', true); return; }
+  const p = ftdiPort(); if (!p) { toast('Tidak ada modul FTDI di rangkaian.', true); return; }
+  p.send(i.value + $('#ftdiEol').value.replace('\\r', '\r').replace('\\n', '\n')); ftdiAppend('> ' + i.value + '\n', true); i.value = '';
+};
+$('#ftdiDtr').onclick = () => {
+  if (!sim.running) { toast('Jalankan simulasi dulu.', true); return; }
+  const p = ftdiPort(); if (!p) return;
+  if (p.pulseDtr()) { addLog('info', `${p.label}: DTR → RESET, program dimulai ulang (auto-reset).`); ftdiClear(); $('#btnReset').click(); }
+  else toast('Pulsa DTR terkirim, tetapi DTR tidak tersambung ke RESET (pakai kapasitor 100 nF/100 µF ke pin RESET).');
+};
 // HTTP requests go through this device's real internet connection
 sim.on('net', ({ method, url }) => addLog('info', `🌐 ${method} ${url.length > 90 ? url.slice(0, 90) + '…' : url}`));
 
@@ -207,7 +239,11 @@ function updateBoardTabs() {
   const b = boardOf(), kind = runtimeOf(b);
   $('#tabBt').hidden = !(kind === 'esp32' && /BluetoothSerial/.test(editor.value));
   $('#tabCam').hidden = !(b?.part.type === 'mod-esp32-cam' || /esp_camera\.h/.test(editor.value));
-  if ((consoleTab === 'bt' && $('#tabBt').hidden) || (consoleTab === 'cam' && $('#tabCam').hidden)) showConsole('log');
+  const ftdis = [...canvas.parts.values()].filter((p) => p.type === 'mod-ftdi').map((p) => p.id), sel = $('#ftdiPort');
+  $('#tabFtdi').hidden = !ftdis.length;
+  if (ftdis.join() !== [...sel.options].map((o) => o.value).join()) { const cur = sel.value; sel.innerHTML = ftdis.map((id) => `<option value="${id}">${id}</option>`).join(''); if (ftdis.includes(cur)) sel.value = cur; }
+  sel.hidden = ftdis.length < 2;
+  if ((consoleTab === 'bt' && $('#tabBt').hidden) || (consoleTab === 'cam' && $('#tabCam').hidden) || (consoleTab === 'ftdi' && $('#tabFtdi').hidden)) showConsole('log');
 }
 
 // ------------------------------------------------------------------ user libraries (.zip) + gateway info
@@ -546,6 +582,7 @@ const HINTS = {
   'mod-nrf24': 'Library RF24: RF24 radio(CE, CSN). VCC 3,3 V! Paket terlihat di log. Pilih "gema" untuk uji kirim-terima dengan satu board, atau pasang dua modul.',
   'mod-lora': 'LoRa (Sandeep Mistry): LoRa.setPins(NSS, RST, DIO0); LoRa.begin(433E6). Waktu kirim sesuai time-on-air sebenarnya (SF, BW).',
   'mod-gps': 'TinyGPS++ dengan SoftwareSerial(RX, TX) 9600 baud. TX GPS → pin RX Arduino. Atur posisi di properti.',
+  'mod-ftdi': 'Adaptor USB-Serial: terminal PC di tab USB-Serial. Silangkan TXD→RX dan RXD→TX, satukan GND. Baud terminal diatur di Properti; jumper 5V/3.3V. DTR→kapasitor→RESET untuk auto-reset.',
   'mod-hc05': 'SoftwareSerial bt(RX, TX); bt.begin(9600). Data muncul di tab Bluetooth. EN ke 5V saat menyala = mode AT (38400).',
   'mod-sim800l': 'AT command lewat Serial (9600). SMS: AT+CMGF=1, AT+CMGS="nomor", teks, lalu karakter 26 (Ctrl-Z). SMS & panggilan tampil di log.',
   'mod-esp01': 'Firmware AT (115200, bisa diubah). 3V3 dan EN ke 3,3 V. AT+CWJAP lalu AT+CIPSTART/CIPSEND mengirim HTTP sungguhan lewat browser.',

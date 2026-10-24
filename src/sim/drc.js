@@ -43,6 +43,12 @@ export function checkDesign(model, els) {
     if (t === 'mod-solar') { sources.set(net(p.id, '+'), 6); sources.set(net(p.id, '-'), 0); }
     if (t === 'mod-buck') sources.set(net(p.id, 'OUT+'), +(a.vout ?? 5));
     if (t === 'mod-l298n' && sources.get(net(p.id, '12V')) >= 7) sources.set(net(p.id, '5V'), 5);
+    if (t === 'mod-ftdi') {                                               // USB-powered: VCC is an output (jumper 5 V / 3.3 V)
+      const vv = a.vio === '3.3V' ? 3.3 : 5, vn = net(p.id, 'VCC'), gn = net(p.id, 'GND');
+      if (vn >= 0 && sources.has(vn) && sources.get(vn) !== vv) add('error', `Korsleting: VCC ${p.id} (${vv} V dari USB) terhubung ke rel ${sources.get(vn)} V. ${vv === 3.3 ? 'Pindahkan jumper FTDI ke 5V atau lepaskan kabel VCC.' : 'Lepaskan kabel VCC FTDI.'}`);
+      else if (vn >= 0) sources.set(vn, vv);
+      if (gn >= 0 && !sources.has(gn)) sources.set(gn, 0);
+    }
   }
 
   // ---- shorts between supply rails
@@ -60,7 +66,7 @@ export function checkDesign(model, els) {
     const ct = BY_TAG[p.type]; if (!ct || ct.board || ct.breadboard || p.type === 'wokwi-resistor') continue;
     const pins = pinsOf(p.id); const vccPin = pins.find((x) => POWER_IN.includes(base(x)) && !['V+'].includes(base(x)) || base(x) === 'V+' && p.type === 'wokwi-servo');
     const gndPin = pins.find((x) => GND_IN.includes(base(x)));
-    if (!vccPin || !gndPin || ['mod-battery9v', 'mod-battery18650', 'mod-solar', 'mod-buck', 'mod-voltage', 'mod-acs712', 'mod-mosfet', 'mod-npn', 'mod-dc-motor', 'mod-pump', 'mod-fan', 'mod-solenoid', 'wokwi-led', 'wokwi-buzzer'].includes(p.type)) continue;
+    if (!vccPin || !gndPin || ['mod-battery9v', 'mod-battery18650', 'mod-solar', 'mod-buck', 'mod-voltage', 'mod-acs712', 'mod-mosfet', 'mod-npn', 'mod-ftdi', 'mod-capacitor', 'mod-diode', 'mod-dc-motor', 'mod-pump', 'mod-fan', 'mod-solenoid', 'wokwi-led', 'wokwi-buzzer'].includes(p.type)) continue;
     const anyWired = pins.some((x) => c.isWired(p.id, x)); if (!anyWired) { add('info', `${p.id}: belum dirangkai.`); continue; }
     const vn = net(p.id, vccPin), gn = net(p.id, gndPin);
     if (!sources.has(vn)) add('warn', `${p.id}: pin ${base(vccPin)} tidak mendapat tegangan (hubungkan ke 5V / 3V3 / VIN).`);

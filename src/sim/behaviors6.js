@@ -108,6 +108,61 @@ const hc05 = (ctx) => {
   };
 };
 
+// ------------------------------------------------------------------ FTDI FT232RL USB-serial adapter: a serial terminal on the computer
+// Bytes arriving on RXD are shown in the "USB-Serial" console tab; text typed there leaves on TXD at the terminal's baud rate.
+// VCC is an output powered by USB (5 V or 3.3 V jumper, which also sets the TXD/DTR logic level). DTR idles HIGH and is
+// pulsed LOW by the terminal's reset button: wired to RESET (directly or through a capacitor) it restarts the program.
+const ftdi = (ctx) => {
+  const sim = ctx.sim;
+  let link = null, dtrLow = false, lastTx = -1e12, lastRx = -1e12, checked = false;
+  const vio = () => (attr(ctx, 'vio', '5V') === '3.3V' ? 3.3 : 5);
+  const now = () => sim.board.cpu.cycles;
+  const dtrResets = () => {
+    const bp = sim.boardPart; if (!bp) return false;
+    const r = sim.circuit.net(bp.id, 'RESET'), d = ctx.n('DTR');
+    if (r < 0 || d < 0) return false;
+    if (r === d) return true;
+    return sim.model.parts.some((p) => p.type === 'mod-capacitor' && [sim.circuit.net(p.id, '+'), sim.circuit.net(p.id, '-')].sort().join() === [r, d].sort().join());
+  };
+  return {
+    attach() {
+      link = uartLink(ctx, { rx: 'RXD', tx: 'TXD' }, {
+        baud: () => +attr(ctx, 'baud', 9600),
+        onByte(b) { lastRx = now(); sim.emit('ftdi', { id: ctx.part.id, b }); },
+      });
+      (sim.ftdiPorts ||= []).push({
+        id: ctx.part.id, label: ctx.label,
+        send(data) { lastTx = now(); link.send(data); },
+        pulseDtr() {
+          dtrLow = true; sim.resolveNow();
+          sim.after(1000 * US, () => { dtrLow = false; sim.resolveNow(); });
+          return dtrResets();
+        },
+      });
+    },
+    drivers1: () => [
+      { net: ctx.n('VCC'), value: vio() / 5, label: ctx.label + ' VCC (USB)', rail: true },
+      { net: ctx.n('GND'), value: 0, label: ctx.label + ' GND', rail: true },
+      ...link.drivers(vio() / 5),
+      { net: ctx.n('DTR'), value: dtrLow ? 0 : vio() / 5, label: ctx.label + ' DTR' },
+    ],
+    render() {
+      if (!checked && sim.running) {                                   // wiring checks once all modules are attached
+        checked = true;
+        const rx = ctx.n('RXD'), tx = ctx.n('TXD'), used = (n) => n >= 0 && (sim.arduinoPinsOnNet(n).length || sim.uart.links.some((l) => l.label !== ctx.label && (l.rxNet === n || l.txNet === n)));
+        if (!used(rx) && !used(tx)) sim.warn(`ftdi-io-${ctx.part.id}`, `${ctx.label}: RXD/TXD belum terhubung. Silangkan: TXD FTDI → RX mikrokontroler/modul, RXD FTDI → TX.`);
+        const gnd = ctx.n('GND'), boardGnd = sim.rails.filter((r) => r.value === 0).map((r) => r.net);
+        if (boardGnd.length && !boardGnd.includes(gnd)) sim.warn(`ftdi-gnd-${ctx.part.id}`, `${ctx.label}: GND FTDI belum disatukan dengan GND board. Tanpa ground bersama, data serial tidak terbaca.`);
+      }
+      const t = now(), win = 16e6 * 0.04;
+      ctx.el.setLed?.('pwr', true);
+      ctx.el.setLed?.('tx', link?.busy() || t - lastTx < win);
+      ctx.el.setLed?.('rx', t - lastRx < win);
+    },
+    reset() { link?.reset(); dtrLow = false; lastTx = lastRx = -1e12; checked = false; },
+  };
+};
+
 // ------------------------------------------------------------------ SIM800L GSM modem (AT commands, SMS, calls)
 const sim800 = (ctx) => {
   let skipLF = false;
@@ -279,6 +334,7 @@ const esp01 = (ctx) => {
 export const BEHAVIORS6 = {
   'mod-gps': gps,
   'mod-hc05': hc05,
+  'mod-ftdi': ftdi,
   'mod-sim800l': sim800,
   'mod-esp01': esp01,
 };

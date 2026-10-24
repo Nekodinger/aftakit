@@ -83,4 +83,15 @@ void loop(){ if (IrReceiver.decode()) { Serial.printf("%s %X %X %d\\n", getProto
   await runMs(sim, 100); rem.fire('button-press', { key: '1', irCode: 0x30 }); await runMs(sim, 200); rem.fire('button-release', { key: '1', irCode: 0x30 }); await runMs(sim, 200);
   ok(lines(sim)[0] === 'NEC 30 CF30FF00 0' && lines(sim)[1] === 'NEC 30 0 1', `ESP32 IRremote: ${lines(sim).join(' | ')}`);
 }
+{
+  // FTDI USB-serial adapter on Serial2 (RX2/TX2): ESP32 <-> computer terminal at 3.3 V logic
+  const { sim } = await make([['ftdi1', 'mod-ftdi', ['DTR', 'RXD', 'TXD', 'VCC', 'CTS', 'GND'], {}, { vio: '3.3V', baud: '115200' }]],
+    [['ftdi1:RXD', 'esp:TX2'], ['ftdi1:TXD', 'esp:RX2'], ['ftdi1:GND', 'esp:GND.1']],
+    `void setup(){ Serial.begin(115200); Serial2.begin(115200); Serial2.println("ESP32 siap"); }
+void loop(){ while (Serial2.available()) { char c = Serial2.read(); Serial.write(c); } }`);
+  let term = ''; sim.on('ftdi', ({ b }) => (term += String.fromCharCode(b)));
+  sim.running = true; await runMs(sim, 300);
+  sim.ftdiPorts[0].send('halo esp\n'); await runMs(sim, 300);
+  ok(term.includes('ESP32 siap') && sim.serial.includes('halo esp'), `ESP32 Serial2 <-> FTDI: term=${JSON.stringify(term)} serial=${JSON.stringify(sim.serial)}`);
+}
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS'); process.exit(fails ? 1 : 0);
