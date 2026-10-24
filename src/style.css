@@ -308,6 +308,23 @@ dialog label input { width: 100%; margin-top: 4px; background: var(--panel-2); b
 /* ---- Bluetooth terminal + ESP32-CAM panes */
 #btPane, #camPane, #ftdiPane { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 #btPane[hidden], #camPane[hidden], #ftdiPane[hidden] { display: none; }
+#console.tall { height: 380px; }
+#dronePane { display: flex; flex: 1; min-height: 0; outline: none; }
+#dronePane[hidden] { display: none; }
+.drone-view { position: relative; flex: 1; min-width: 0; }
+.drone-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.drone-note { position: absolute; left: 12px; bottom: 8px; }
+.drone-tx { width: 290px; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 8px; border-left: 1px solid var(--line); overflow: auto; }
+.tx-row { display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.stick { position: relative; width: 128px; height: 128px; border-radius: 18px; background: var(--panel-2); border: 1px solid var(--line-2); touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.stick::before, .stick::after { content: ''; position: absolute; background: var(--line-2); }
+.stick::before { left: 50%; top: 10px; bottom: 10px; width: 1px; } .stick::after { top: 50%; left: 10px; right: 10px; height: 1px; }
+.stick .knob { position: absolute; left: calc(50% - 14px); top: calc(50% - 14px); width: 28px; height: 28px; border-radius: 50%; background: var(--accent, #3b5bdb); box-shadow: 0 2px 6px #0004; z-index: 1; pointer-events: none; }
+.stick .val { position: absolute; left: 0; right: 0; bottom: -17px; text-align: center; font: 10px var(--mono, monospace); color: var(--muted); }
+.stick .lbl { position: absolute; left: 0; right: 0; top: 3px; text-align: center; font-size: 10px; color: var(--muted); }
+.tx-sw { margin-top: 14px; } .sw { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.tx-help { text-align: center; }
+@media (max-width: 760px) { #console.tall { height: 470px; } #dronePane { flex-direction: column; } .drone-view { min-height: 220px; } .drone-tx { width: auto; border-left: 0; border-top: 1px solid var(--line); } .stick { width: 112px; height: 112px; } }
 #ftdiOut { flex: 1; margin: 0; padding: 8px 10px; font: 12px/1.45 var(--mono, ui-monospace, monospace); white-space: pre-wrap; overflow: auto; min-height: 0; }
 #ftdiOut .me { color: #2f7cf6; }
 #ftdiForm { display: flex; gap: 6px; padding: 6px; border-top: 1px solid var(--line); }

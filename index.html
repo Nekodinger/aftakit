@@ -208,6 +208,7 @@
             <button class="tab" data-tab="serial">Serial Monitor <span class="badge dot" id="serialBadge" hidden></span></button>
             <button class="tab" data-tab="bt" id="tabBt" hidden>Bluetooth <span class="badge dot" id="btBadge" hidden></span></button>
             <button class="tab" data-tab="ftdi" id="tabFtdi" hidden>USB-Serial <span class="badge dot" id="ftdiBadge" hidden></span></button>
+            <button class="tab" data-tab="drone" id="tabDrone" hidden>Drone</button>
             <button class="tab" data-tab="cam" id="tabCam" hidden>Kamera</button>
             <span class="grow"></span>
             <button class="mini" id="logClear" title="Bersihkan">Bersihkan</button>
@@ -227,6 +228,21 @@
             <div class="bt-head"><span class="dot on ftdi" id="ftdiDot"></span><span id="ftdiName">Terminal PC lewat adaptor USB-Serial (FTDI)</span><span class="grow"></span><select id="ftdiPort" aria-label="Port FTDI" hidden></select></div>
             <pre id="ftdiOut" class="scroll" aria-live="off"></pre>
             <form id="ftdiForm"><input id="ftdiIn" placeholder="Kirim dari PC lewat FTDI (Enter)" autocomplete="off" /><select id="ftdiEol" aria-label="Akhiran baris"><option value="">Tanpa akhiran</option><option value="\n" selected>Newline</option><option value="\r\n">CR + LF</option></select><button type="button" class="mini" id="ftdiDtr" title="Pulsa DTR LOW (auto-reset bila DTR → kapasitor → RESET)">Reset (DTR)</button><button class="btn" type="submit">Kirim</button></form>
+          </div>
+          <div id="dronePane" hidden tabindex="0">
+            <div class="drone-view"><canvas id="droneCanvas"></canvas><div class="drone-note muted small" id="droneNote">Belum ada frame drone.</div></div>
+            <div class="drone-tx">
+              <div class="tx-row">
+                <div class="stick" id="stickL" title="Throttle (atas-bawah, tidak kembali ke tengah) + Yaw"><div class="knob"></div><span class="val"></span><span class="lbl">Throttle / Yaw</span></div>
+                <div class="stick" id="stickR" title="Pitch + Roll"><div class="knob"></div><span class="val"></span><span class="lbl">Pitch / Roll</span></div>
+              </div>
+              <div class="tx-row tx-sw">
+                <label class="sw"><input type="checkbox" id="sw5" /> ARM (CH5)</label>
+                <label class="sw"><input type="checkbox" id="sw6" /> Mode (CH6)</label>
+              </div>
+              <div class="tx-row"><button class="mini" id="droneReset">Reset drone</button><button class="mini" id="droneCharge">Isi baterai</button></div>
+              <div class="muted small tx-help">Keyboard: W/S throttle, A/D yaw, panah = pitch/roll, Spasi = ARM.</div>
+            </div>
           </div>
           <div id="camPane" hidden>
             <div class="cam-src">

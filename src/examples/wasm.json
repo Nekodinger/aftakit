@@ -43,5 +43,10 @@
   "file": "wasm/esp32cam-pir-bef2598211.wasm",
   "board": "esp32",
   "bytes": 197820
+ },
+ "drone-fc-esp32": {
+  "file": "wasm/drone-fc-esp32-59031ea46f.wasm",
+  "board": "esp32",
+  "bytes": 209153
  }
 }

@@ -3,9 +3,11 @@ import { LcdI2C, SSD1306, MPU6050, RTC } from './i2c.js';
 import { BoschEnv, MAX30102 } from './i2cEnv.js';
 
 const live = (x) => x !== null && x !== undefined;
+// sensors follow the quadcopter's motion when a drone frame is in the circuit (unless set to manual values)
+const onDrone = (ctx) => ctx.sim.drone && !String(attr(ctx, 'drone', 'ikut')).startsWith('tidak');
 const attr = (ctx, k, d) => (ctx.part.attrs?.[k] ?? d);
 
-function i2cPart(ctx, { vcc, gnd, sda = 'SDA', scl = 'SCL', make, addr }) {
+export function i2cPart(ctx, { vcc, gnd, sda = 'SDA', scl = 'SCL', make, addr }) {
   let dev = null, wired = false;
   const powered = (v) => { const a = v(ctx.n(vcc)), b = v(ctx.n(gnd)); return live(a) && live(b) && a - b > 0.5 && b < 0.25; };
   return {
@@ -70,7 +72,7 @@ const mpu = (ctx) => {
   let ad0 = 0;
   const base = i2cPart(ctx, {
     vcc: 'VCC', gnd: 'GND',
-    make: () => new MPU6050(ctx.label, () => ({ ax: +attr(ctx, 'ax', 0), ay: +attr(ctx, 'ay', 0), az: +attr(ctx, 'az', 1), gx: +attr(ctx, 'gx', 0), gy: +attr(ctx, 'gy', 0), gz: +attr(ctx, 'gz', 0), temp: +attr(ctx, 'temp', 30) })),
+    make: () => new MPU6050(ctx.label, () => onDrone(ctx) ? ctx.sim.drone.imu(attr(ctx, 'orient', 'ke depan')) : ({ ax: +attr(ctx, 'ax', 0), ay: +attr(ctx, 'ay', 0), az: +attr(ctx, 'az', 1), gx: +attr(ctx, 'gx', 0), gy: +attr(ctx, 'gy', 0), gz: +attr(ctx, 'gz', 0), temp: +attr(ctx, 'temp', 30) })),
     addr: () => 0x68 + ad0,
   });
   return { ...base, attach() { const x = ctx.sim.last?.v(ctx.n('AD0')); ad0 = live(x) && x > 0.5 ? 1 : 0; base.attach(); } };
@@ -80,7 +82,7 @@ const rtc = (kind, vcc) => (ctx) => i2cPart(ctx, { vcc, gnd: 'GND', make: () => 
 
 const bosch = (kind, vcc) => (ctx) => i2cPart(ctx, {
   vcc, gnd: 'GND',
-  make: () => new BoschEnv(ctx.label, kind, () => ({ temp: +attr(ctx, 'temperature', 24), pressure: +attr(ctx, 'pressure', 1013), humidity: kind === 'bme280' ? +attr(ctx, 'humidity', 50) : 0 })),
+  make: () => new BoschEnv(ctx.label, kind, () => ({ temp: +attr(ctx, 'temperature', 24), pressure: +attr(ctx, 'pressure', 1013) * (onDrone(ctx) ? (1 - 2.25577e-5 * ctx.sim.drone.altitude()) ** 5.25588 : 1), humidity: kind === 'bme280' ? +attr(ctx, 'humidity', 50) : 0 })),
   addr: () => parseInt(attr(ctx, 'address', '0x76'), 16),
 });
 

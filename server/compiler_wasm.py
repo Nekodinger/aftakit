@@ -32,6 +32,12 @@ CXXFLAGS = ["-std=gnu++17", "-fno-threadsafe-statics"] + COMMON
 INC = ["-I" + os.path.join(RT, "core"), "-I" + os.path.join(RT, "shim"), "-I" + os.path.join(RT, "ArduinoJson", "src")]
 # real third-party libraries compiled for the simulator (header -> source dir)
 LIBS = {
+    "VL53L0X.h": os.path.join(SRC, "vl53l0x-arduino"),
+    "Adafruit_VL53L0X.h": os.path.join(SRC, "Adafruit_VL53L0X", "src"),
+    "TFMPlus.h": os.path.join(SRC, "TFMini-Plus", "src"),
+    "IBusBM.h": os.path.join(SRC, "IBusBM", "src"),
+    "Adafruit_MPU6050.h": os.path.join(SRC, "Adafruit_MPU6050"),
+    "MPU6050_light.h": os.path.join(SRC, "MPU6050_light", "src"),
     "LiquidCrystal_I2C.h": os.path.join(SRC, "LiquidCrystal_I2C"),
     "Adafruit_GFX.h": os.path.join(SRC, "Adafruit-GFX-Library"),
     "Adafruit_SSD1306.h": os.path.join(SRC, "Adafruit_SSD1306"),
@@ -59,7 +65,7 @@ LIBS = {
     "TinyGPSPlus.h": os.path.join(SRC, "TinyGPSPlus", "src"),
     "SD.h": os.path.join(RT, "SD"),                       # Arduino SD with the generic pin map + ESP32 API extras
 }
-DEPS = {"Adafruit_GFX.h": ["Adafruit_I2CDevice.h"], "Adafruit_SSD1306.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "RTClib.h": ["Adafruit_I2CDevice.h"], "DallasTemperature.h": ["OneWire.h"], "MD_Parola.h": ["MD_MAX72xx.h"], "Adafruit_ILI9341.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "Adafruit_BMP280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"], "Adafruit_BME280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"]}
+DEPS = {"Adafruit_MPU6050.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"], "Adafruit_GFX.h": ["Adafruit_I2CDevice.h"], "Adafruit_SSD1306.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "RTClib.h": ["Adafruit_I2CDevice.h"], "DallasTemperature.h": ["OneWire.h"], "MD_Parola.h": ["MD_MAX72xx.h"], "Adafruit_ILI9341.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "Adafruit_BMP280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"], "Adafruit_BME280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"]}
 ASYNC_IMPORTS = "ard.delay_us,ard.yield_,ard.http,ard.net_open,ard.net_dns"
 _lock = threading.RLock()
 

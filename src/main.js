@@ -6,6 +6,7 @@ import { Simulator, IDLE_HEX } from './sim/sim.js';
 import { checkDesign } from './sim/drc.js';
 import { CircuitCanvas } from './ui/canvas.js';
 import { Editor } from './ui/editor.js';
+import { initDroneView } from './ui/droneview.js';
 import { compile, loadSettings, saveSettings, testServer, compileEndpoint, parseDiagnostics, gatewayUrl, compileBase } from './compile.js';
 import { putZip, getZip, sha256, describeZip } from './libs.js';
 import { saveProject, loadProject, sharingAvailable } from './store.js';
@@ -116,12 +117,13 @@ function hintFor(msg) {
 }
 
 // ------------------------------------------------------------------ console tabs + serial
-let consoleTab = 'log';
+let consoleTab = 'log', droneView = null;
 function showConsole(name) {
   consoleTab = name;
   $$('[data-tab]').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
   $('#logList').hidden = name !== 'log'; $('#serialPane').hidden = name !== 'serial';
   $('#btPane').hidden = name !== 'bt'; $('#camPane').hidden = name !== 'cam'; $('#ftdiPane').hidden = name !== 'ftdi';
+  $('#dronePane').hidden = name !== 'drone'; $('#console').classList.toggle('tall', name === 'drone'); droneView?.show(name === 'drone');
   if (name === 'serial') $('#serialBadge').hidden = true;
   if (name === 'bt') $('#btBadge').hidden = true;
   if (name === 'ftdi') $('#ftdiBadge').hidden = true;
@@ -159,6 +161,10 @@ function btSend(text) {
 }
 $('#btForm').onsubmit = (e) => { e.preventDefault(); const i = $('#btIn'); if (i.value) btSend(i.value); i.value = ''; };
 $$('[data-bt]').forEach((b) => (b.onclick = () => btSend(b.dataset.bt)));
+// ------------------------------------------------------------------ Drone tab: 3D view + RC transmitter
+droneView = initDroneView(sim, { canvas: $('#droneCanvas'), stickL: $('#stickL'), stickR: $('#stickR'), sw5: $('#sw5'), sw6: $('#sw6'), btnReset: $('#droneReset'), btnCharge: $('#droneCharge'), note: $('#droneNote') });
+const DRONE_TYPES = new Set(['mod-drone-frame', 'mod-esc', 'mod-rc-rx', 'mod-bldc-a2212', 'mod-bldc-2205']);
+
 // ------------------------------------------------------------------ USB-Serial (FTDI) terminal: the computer side of an FTDI adapter
 const ftdiOut = $('#ftdiOut'), ftdiDec = {};
 function ftdiAppend(text, mine, id) {
@@ -241,9 +247,11 @@ function updateBoardTabs() {
   $('#tabCam').hidden = !(b?.part.type === 'mod-esp32-cam' || /esp_camera\.h/.test(editor.value));
   const ftdis = [...canvas.parts.values()].filter((p) => p.type === 'mod-ftdi').map((p) => p.id), sel = $('#ftdiPort');
   $('#tabFtdi').hidden = !ftdis.length;
+  const hadDrone = !$('#tabDrone').hidden; $('#tabDrone').hidden = ![...canvas.parts.values()].some((p) => DRONE_TYPES.has(p.type));
+  if (!hadDrone && !$('#tabDrone').hidden && [...canvas.parts.values()].some((p) => p.type === 'mod-drone-frame')) addLog('info', 'Tab Drone tersedia: tampilan 3D, telemetri, dan remote (stik) untuk receiver RC.');
   if (ftdis.join() !== [...sel.options].map((o) => o.value).join()) { const cur = sel.value; sel.innerHTML = ftdis.map((id) => `<option value="${id}">${id}</option>`).join(''); if (ftdis.includes(cur)) sel.value = cur; }
   sel.hidden = ftdis.length < 2;
-  if ((consoleTab === 'bt' && $('#tabBt').hidden) || (consoleTab === 'cam' && $('#tabCam').hidden) || (consoleTab === 'ftdi' && $('#tabFtdi').hidden)) showConsole('log');
+  if ((consoleTab === 'bt' && $('#tabBt').hidden) || (consoleTab === 'cam' && $('#tabCam').hidden) || (consoleTab === 'ftdi' && $('#tabFtdi').hidden) || (consoleTab === 'drone' && $('#tabDrone').hidden)) showConsole('log');
 }
 
 // ------------------------------------------------------------------ user libraries (.zip) + gateway info
@@ -582,6 +590,19 @@ const HINTS = {
   'mod-nrf24': 'Library RF24: RF24 radio(CE, CSN). VCC 3,3 V! Paket terlihat di log. Pilih "gema" untuk uji kirim-terima dengan satu board, atau pasang dua modul.',
   'mod-lora': 'LoRa (Sandeep Mistry): LoRa.setPins(NSS, RST, DIO0); LoRa.begin(433E6). Waktu kirim sesuai time-on-air sebenarnya (SF, BW).',
   'mod-gps': 'TinyGPS++ dengan SoftwareSerial(RX, TX) 9600 baud. TX GPS → pin RX Arduino. Atur posisi di properti.',
+  'mod-motor-tt': 'Motor kuning 3–6 V dengan gearbox 1:48 (±200 rpm di 6 V). Kendalikan lewat L298N/MOSFET, jangan langsung dari pin.',
+  'mod-motor-130': 'Motor DC kecil 3–6 V (±10.000 rpm tanpa beban). Butuh driver: MOSFET, transistor, atau L298N.',
+  'mod-motor-coreless': 'Motor coreless 8520 untuk drone mini (1S 3,7 V, ±34 g gaya dorong dengan baling 65 mm). Kendalikan dengan MOSFET logic-level + PWM.',
+  'mod-motor-rs385': 'Motor DC 12 V ±8.000 rpm. Gunakan L298N / MOSFET dan catu 12 V.',
+  'mod-motor-rs775': 'Motor DC 12 V torsi besar (arus macet ±30 A). Gunakan MOSFET/driver arus besar.',
+  'mod-bldc-a2212': 'Motor brushless A2212 1000KV (drone F450, baling 1045, 2–3S). Hubungkan A/B/C ke ESC; tukar dua fase untuk membalik arah putar.',
+  'mod-bldc-2205': 'Motor brushless 2205 2300KV untuk drone racing 5 inci (3–4S). Hubungkan A/B/C ke ESC.',
+  'mod-esc': 'ESC 30A: BAT+/BAT− ke LiPo, A/B/C ke motor, SIG ke pin PWM (Servo/ESP32Servo 1000–2000 µs). Arm: kirim 1000 µs ±1 detik. 5V = BEC.',
+  'mod-drone-frame': 'Frame quadcopter X: motor berbaling dipasang otomatis M1 depan-kanan (CCW), M2 belakang-kanan (CW), M3 belakang-kiri (CCW), M4 depan-kiri (CW). MPU6050, BMP280 dan LIDAR ikut gerakan drone. Lihat tab Drone.',
+  'mod-rc-rx': 'Receiver FS-iA6B: kanal dari remote di tab Drone. CH1–CH6 PWM (pulseIn), PPM di CH1, atau iBUS (115200) di pin IBUS → RX serial.',
+  'mod-lipo': 'Baterai LiPo: pilih jumlah sel (3S = 11,1 V nominal, 12,6 V penuh), kapasitas dan C-rating. Tegangan turun saat arus besar dan saat isi berkurang.',
+  'mod-vl53l0x': 'LIDAR ToF VL53L0X (I2C 0x29, 3–5 V): library VL53L0X (Pololu) atau Adafruit_VL53L0X. Jangkauan ±2 m.',
+  'mod-tfluna': 'LIDAR TF-Luna: UART 115200, bingkai 9 byte 0x59 0x59 (jarak cm). Library TFMPlus. Jangkauan 0,2–8 m, daya 5 V.',
   'mod-ftdi': 'Adaptor USB-Serial: terminal PC di tab USB-Serial. Silangkan TXD→RX dan RXD→TX, satukan GND. Baud terminal diatur di Properti; jumper 5V/3.3V. DTR→kapasitor→RESET untuk auto-reset.',
   'mod-hc05': 'SoftwareSerial bt(RX, TX); bt.begin(9600). Data muncul di tab Bluetooth. EN ke 5V saat menyala = mode AT (38400).',
   'mod-sim800l': 'AT command lewat Serial (9600). SMS: AT+CMGF=1, AT+CMGS="nomor", teks, lalu karakter 26 (Ctrl-Z). SMS & panggilan tampil di log.',

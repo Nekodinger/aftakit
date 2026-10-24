@@ -7,7 +7,7 @@ import { MODULE_SPECS } from './parts/modules.js';
 const colors = ['red', 'green', 'blue', 'yellow', 'white', 'orange', 'purple', 'cyan'];
 const slider = (key, label, min, max, step, def, unit = '') => ({ key, label, type: 'range', min, max, step, def, unit });
 
-export const CATEGORIES = ['Mikrokontroler', 'Breadboard', 'Sensor', 'Input', 'Tampilan', 'Output', 'Aktuator', 'Komunikasi', 'Daya', 'Pasif & Dasar'];
+export const CATEGORIES = ['Mikrokontroler', 'Breadboard', 'Sensor', 'Input', 'Tampilan', 'Output', 'Aktuator', 'Drone', 'Komunikasi', 'Daya', 'Pasif & Dasar'];
 
 const ESP32_DEVKIT_GPIO = {
   D13: 13, D12: 12, D14: 14, D27: 27, D26: 26, D25: 25, D33: 33, D32: 32, D35: 35, D34: 34, VN: 39, VP: 36,
@@ -78,7 +78,9 @@ const WOKWI = [
     props: [slider('temperature', 'Suhu', -40, 80, 0.5, 28, ' °C'), slider('humidity', 'Kelembapan', 0, 100, 0.5, 65, ' %')] },
   { tag: 'wokwi-mpu6050', name: 'MPU6050 (gyro + akselerometer)', cat: 'Sensor', sim: 'full', i2c: true, keywords: 'imu gyro accelerometer gy-521 kemiringan',
     props: [slider('ax', 'Akselerasi X', -2, 2, 0.05, 0, ' g'), slider('ay', 'Akselerasi Y', -2, 2, 0.05, 0, ' g'), slider('az', 'Akselerasi Z', -2, 2, 0.05, 1, ' g'),
-      slider('gx', 'Rotasi X', -250, 250, 5, 0, ' °/s'), slider('gy', 'Rotasi Y', -250, 250, 5, 0, ' °/s'), slider('gz', 'Rotasi Z', -250, 250, 5, 0, ' °/s'), slider('temp', 'Suhu chip', -10, 60, 1, 30, ' °C')] },
+      slider('gx', 'Rotasi X', -250, 250, 5, 0, ' °/s'), slider('gy', 'Rotasi Y', -250, 250, 5, 0, ' °/s'), slider('gz', 'Rotasi Z', -250, 250, 5, 0, ' °/s'), slider('temp', 'Suhu chip', -10, 60, 1, 30, ' °C'),
+      { key: 'drone', label: 'Bila ada frame drone', type: 'select', options: ['ikut drone', 'tidak (nilai manual)'], def: 'ikut drone' },
+      { key: 'orient', label: 'Arah sumbu X chip di drone', type: 'select', options: ['ke depan', 'ke kanan', 'ke belakang', 'ke kiri'], def: 'ke depan' }] },
   { tag: 'wokwi-ds1307', name: 'RTC DS1307', cat: 'Sensor', sim: 'full', i2c: true, keywords: 'rtc clock jam waktu' },
   { tag: 'wokwi-photoresistor-sensor', name: 'LDR (modul)', cat: 'Sensor', sim: 'full', keywords: 'ldr cahaya light', outs: ['AO', 'DO'], logic: 'vcc', props: [slider('level', 'Intensitas cahaya', 0, 100, 1, 50, '%')] },
   { tag: 'wokwi-ntc-temperature-sensor', name: 'Sensor Suhu NTC', cat: 'Sensor', sim: 'full', keywords: 'thermistor temperature', outs: ['OUT'], logic: 'vcc', props: [slider('level', 'Suhu', -24, 80, 1, 24, ' °C')] },

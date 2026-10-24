@@ -31,9 +31,9 @@ function decoSvg(d) {
     case 'rect': return `<rect x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" rx="${d.rx ?? 1}" fill="${f}"${st}/>`;
     case 'circle': return `<circle cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${f}"${st}/>`;
     case 'path': return `<path d="${d.d}" fill="${f}"${st}/>`;
-    case 'text': return `<text x="${d.x}" y="${d.y}" font-size="${d.size ?? 7}" fill="${d.fill ?? '#fff'}" text-anchor="${d.anchor ?? 'middle'}" font-weight="${d.bold ? 700 : 500}" font-family="Arial,Helvetica,sans-serif">${esc(d.text)}</text>`;
+    case 'text': return `<text x="${d.x}" y="${d.y}" font-size="${d.size ?? 7}" fill="${d.fill ?? '#fff'}" text-anchor="${d.anchor ?? 'middle'}" font-weight="${d.bold ? 700 : 500}" font-family="Arial,Helvetica,sans-serif"${d.key ? ` data-text="${d.key}"` : ''}>${esc(d.text)}</text>`;
     case 'led': return `<circle data-led="${d.key}" cx="${d.x}" cy="${d.y}" r="${d.r ?? 2.6}" fill="#3a2a2a" data-on="${d.color ?? '#ff3b30'}" stroke="#0006" stroke-width=".6"/>`;
-    case 'rotor': return `<g data-rotor transform-origin="${d.x} ${d.y}"><circle cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${d.fill ?? '#c9ced6'}" stroke="#555" stroke-width="1"/>`
+    case 'rotor': return `<g data-rotor="${d.key ?? ''}" transform-origin="${d.x} ${d.y}"><circle cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${d.fill ?? '#c9ced6'}" stroke="#555" stroke-width="1"/>`
       + `<rect x="${d.x - d.r * 0.9}" y="${d.y - 2}" width="${d.r * 1.8}" height="4" rx="2" fill="#555"/><rect x="${d.x - 2}" y="${d.y - d.r * 0.9}" width="4" height="${d.r * 1.8}" rx="2" fill="#777"/>`
       + `<circle cx="${d.x}" cy="${d.y}" r="3" fill="#333"/></g>`;
     case 'pad': return `<circle data-pad cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${f}" stroke="#d9c27a" stroke-width="1.5" style="cursor:pointer"/>`;
@@ -85,7 +85,8 @@ export function defineModule(spec) {
       const screen = spec.screen ? `<canvas width="${spec.screen.cols}" height="${spec.screen.rows}" style="position:absolute;left:${spec.screen.x}px;top:${spec.screen.y}px;width:${spec.screen.w}px;height:${spec.screen.h}px;image-rendering:pixelated;background:#000"></canvas>` : '';
       this.shadowRoot.innerHTML = `<style>:host{display:inline-block;position:relative;width:${w}px;height:${h}px;line-height:0}svg{display:block;overflow:visible}[data-rotor]{transition:none}</style>`
         + `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">${body}${(spec.deco || []).map(decoSvg).join('')}${label}${pinsSvg}</svg>${screen}`;
-      this._rotor = this.shadowRoot.querySelector('[data-rotor]');
+      this._rotor = this.shadowRoot.querySelector('[data-rotor=""]');
+      this._rotors = Object.fromEntries([...this.shadowRoot.querySelectorAll('[data-rotor]')].map((g) => [g.dataset.rotor, g]));
       this._canvas = this.shadowRoot.querySelector('canvas');
       for (const pad of this.shadowRoot.querySelectorAll('[data-pad]')) {
         const down = (e) => { e.stopPropagation(); pad.setAttribute('fill', '#f3d77a'); this.dispatchEvent(new Event('button-press')); };
@@ -102,6 +103,8 @@ export function defineModule(spec) {
     }
     set angle(a) { this._angle = a; if (this._rotor) this._rotor.setAttribute('transform', `rotate(${a})`); }
     get angle() { return this._angle; }
+    /** rotate a named rotor deco (multi-rotor parts such as the drone frame) */
+    setRotor(key, a) { const g = this._rotors?.[key]; if (g) g.setAttribute('transform', `rotate(${a.toFixed(1)})`); }
     // 1-bit framebuffer (Uint8Array cols*rows of 0/1) -> canvas
     drawFrame(bits, color = [140, 220, 255]) {
       if (!this._canvas) return; const { cols, rows } = spec.screen; const ctx = this._canvas.getContext('2d');
@@ -138,6 +141,73 @@ const chip = (x, y, w, h, text = '') => [{ t: 'rect', x, y, w, h, fill: '#111', 
 const pwr = (x, y) => ({ t: 'led', key: 'pwr', x, y, color: '#ff3b30' });
 const sig = (x, y, c = '#33d17a') => ({ t: 'led', key: 'sig', x, y, color: c });
 
+// ---- motor / drone / LiPo / LIDAR parts (behaviour + physics in sim/drone.js and sim/lidar.js)
+const POS = ['otomatis', 'Depan-Kanan (CCW)', 'Belakang-Kanan (CW)', 'Belakang-Kiri (CCW)', 'Depan-Kiri (CW)', 'tidak di drone'];
+const posProp = { key: 'pos', label: 'Posisi di frame drone', type: 'select', options: POS, def: 'otomatis' };
+const motorDeco = (r, fill, extra = []) => [{ t: 'circle', x: 40, y: 40, r: 26, fill: '#2a2d33', stroke: '#111' }, ...extra, { t: 'rotor', x: 40, y: 40, r, fill }, { t: 'text', key: 'rpm', x: 40, y: 76, text: '0 rpm', size: 6.5, fill: '#222', bold: true }];
+const brushed = (tag, name, extra) => ({ tag, name, cat: 'Aktuator', sim: 'full', w: 80, h: 96, color: '#c9ced6', rx: 6, labelColor: '#222', pins: { b: ['+', '-'] }, label: false, ...extra });
+const DRONE_SPECS = [
+  brushed('mod-motor-tt', 'Motor DC TT Gearbox 3–6V (robot)', { color: '#f2c94c', deco: [{ t: 'rect', x: 8, y: 14, w: 64, h: 40, fill: '#f2c94c', rx: 4, stroke: '#b58f1c' }, { t: 'rotor', x: 40, y: 34, r: 14, fill: '#333' }, { t: 'text', key: 'rpm', x: 40, y: 68, text: '0 rpm', size: 6.5, fill: '#222', bold: true }],
+    keywords: 'motor dc tt gearbox gear kuning robot mobil roda 3v 5v 6v',
+    pinDesc: { '+': 'Kutub + (putaran dibalik bila + dan − ditukar)', '-': 'Kutub −' } }),
+  brushed('mod-motor-130', 'Motor DC 130 (3–6V)', { deco: motorDeco(18, '#c9ced6'), keywords: 'motor dc 130 dinamo mainan 3v 5v 6v kipas',
+    props: [{ key: 'prop', label: 'Beban di poros', type: 'select', options: ['tanpa beban', 'baling 75 mm'], def: 'tanpa beban' }, posProp] }),
+  brushed('mod-motor-coreless', 'Motor Coreless 8520 3.7V (drone mini)', { color: '#e5e7eb', deco: motorDeco(30, '#e04848'),
+    keywords: 'coreless 8520 720 716 motor drone mini brushed esp-drone 3.7v 1s quadcopter',
+    props: [{ key: 'prop', label: 'Baling-baling', type: 'select', options: ['65 mm', '55 mm', 'tanpa baling'], def: '65 mm' }, posProp] }),
+  brushed('mod-motor-rs385', 'Motor DC RS-385 12V', { deco: motorDeco(20, '#c9ced6'), keywords: 'motor dc rs385 385 12v dinamo pompa',
+    props: [{ key: 'prop', label: 'Beban di poros', type: 'select', options: ['tanpa beban', 'baling 5 inch'], def: 'tanpa beban' }, posProp] }),
+  brushed('mod-motor-rs775', 'Motor DC RS-775 12V (torsi besar)', { deco: motorDeco(22, '#c9ced6'), keywords: 'motor dc rs775 775 12v 24v torsi besar',
+    props: [{ key: 'prop', label: 'Beban di poros', type: 'select', options: ['tanpa beban', 'baling 8 inch'], def: 'tanpa beban' }, posProp] }),
+  { tag: 'mod-bldc-a2212', name: 'Motor Brushless A2212 1000KV', cat: 'Drone', sim: 'full', w: 80, h: 96, color: '#c9ced6', rx: 6, labelColor: '#222', pins: { b: ['A', 'B', 'C'] }, label: false,
+    deco: motorDeco(34, '#1f2937', [{ t: 'circle', x: 40, y: 40, r: 18, fill: '#b91c1c' }]), keywords: 'brushless bldc a2212 2212 1000kv drone quadcopter f450 motor',
+    pinDesc: { A: 'Fase A ke ESC', B: 'Fase B ke ESC', C: 'Fase C ke ESC (tukar 2 fase = arah putar terbalik)' },
+    props: [{ key: 'prop', label: 'Baling-baling', type: 'select', options: ['1045 (10×4,5")', '9450 (9,4×5")', '8045 (8×4,5")', 'tanpa baling'], def: '1045 (10×4,5")' }, posProp] },
+  { tag: 'mod-bldc-2205', name: 'Motor Brushless 2205 2300KV (racing)', cat: 'Drone', sim: 'full', w: 80, h: 96, color: '#c9ced6', rx: 6, labelColor: '#222', pins: { b: ['A', 'B', 'C'] }, label: false,
+    deco: motorDeco(26, '#0ea5e9', [{ t: 'circle', x: 40, y: 40, r: 16, fill: '#111' }]), keywords: 'brushless bldc 2205 2300kv racing fpv 5 inch drone motor',
+    pinDesc: { A: 'Fase A ke ESC', B: 'Fase B ke ESC', C: 'Fase C ke ESC (tukar 2 fase = arah putar terbalik)' },
+    props: [{ key: 'prop', label: 'Baling-baling', type: 'select', options: ['5045 (5×4,5")', '5040 (5×4")', 'tanpa baling'], def: '5045 (5×4,5")' }, posProp] },
+  { tag: 'mod-esc', name: 'ESC Brushless 30A (BLHeli)', cat: 'Drone', sim: 'full', w: 120, h: 70, color: '#1d4ed8', rx: 4, pins: { l: ['BAT+', 'BAT-'], r: ['A', 'B', 'C'], b: ['SIG', '5V', 'GND'] },
+    deco: [{ t: 'rect', x: 26, y: 10, w: 66, h: 30, fill: '#111', rx: 2 }, { t: 'text', x: 59, y: 22, text: 'ESC 30A', size: 8, fill: '#fff', bold: true }, { t: 'text', x: 59, y: 33, text: 'BEC 5V', size: 5.5, fill: '#bbb' }, { t: 'led', key: 'arm', x: 98, y: 52, color: '#33d17a' }],
+    label: false, keywords: 'esc brushless speed controller simonk blheli 30a 20a 40a drone bec',
+    pinDesc: { 'BAT+': 'Merah tebal: + baterai LiPo', 'BAT-': 'Hitam tebal: − baterai (tersambung ke GND sinyal)', SIG: 'Sinyal PWM servo 1000–2000 µs (50–490 Hz) atau Oneshot125', '5V': 'Keluaran BEC 5 V (boleh untuk VIN board)', GND: 'Ground sinyal' },
+    props: [{ key: 'amps', label: 'Arus maksimum', type: 'select', options: ['30', '20', '40'], def: '30' }] },
+  { tag: 'mod-drone-frame', name: 'Frame Drone Quadcopter X', cat: 'Drone', sim: 'full', w: 210, h: 210, body: false, pins: {}, label: false,
+    deco: [{ t: 'path', d: 'M40 40 L170 170 M170 40 L40 170', fill: 'none', stroke: '#374151', sw: 9 }, { t: 'rect', x: 78, y: 78, w: 54, h: 54, fill: '#111827', rx: 8 },
+      { t: 'path', d: 'M105 66 l-8 10 h16 z', fill: '#ef4444' }, { t: 'text', x: 105, y: 62, text: 'DEPAN', size: 7, fill: '#ef4444', bold: true },
+      { t: 'rotor', key: 'm1', x: 170, y: 40, r: 32, fill: '#9ca3af' }, { t: 'rotor', key: 'm2', x: 170, y: 170, r: 32, fill: '#4b5563' }, { t: 'rotor', key: 'm3', x: 40, y: 170, r: 32, fill: '#9ca3af' }, { t: 'rotor', key: 'm4', x: 40, y: 40, r: 32, fill: '#4b5563' },
+      { t: 'text', x: 170, y: 82, text: 'M1 CCW', size: 6, fill: '#111' }, { t: 'text', x: 170, y: 212, text: 'M2 CW', size: 6, fill: '#111' }, { t: 'text', x: 40, y: 212, text: 'M3 CCW', size: 6, fill: '#111' }, { t: 'text', x: 40, y: 82, text: 'M4 CW', size: 6, fill: '#111' },
+      { t: 'text', key: 'alt', x: 105, y: 102, text: 'h 0.00 m', size: 7, fill: '#fff', bold: true }, { t: 'text', key: 'att', x: 105, y: 114, text: '', size: 5.5, fill: '#cbd5e1' }],
+    keywords: 'drone quadcopter frame f450 quad x multirotor terbang flight controller',
+    props: [{ key: 'preset', label: 'Jenis drone', type: 'select', options: ['F450 (±1,0 kg)', '250 Racing (±0,55 kg)', 'Mini brushed (±40 g)'], def: 'F450 (±1,0 kg)' },
+      { key: 'payload', label: 'Beban tambahan (g)', type: 'range', min: 0, max: 1000, step: 10, def: 0, unit: ' g' },
+      { key: 'wind', label: 'Angin (m/s)', type: 'range', min: 0, max: 10, step: 0.5, def: 0, unit: ' m/s' }] },
+  { tag: 'mod-rc-rx', name: 'Receiver RC FlySky FS-iA6B', cat: 'Drone', sim: 'full', w: 120, h: 76, color: '#1f2937', rx: 4, pins: { l: ['VCC', 'GND', 'IBUS'], b: ['CH1', 'CH2', 'CH3', 'CH4', 'CH5', 'CH6'] },
+    deco: [{ t: 'text', x: 66, y: 22, text: 'FS-iA6B', size: 9, fill: '#fff', bold: true }, { t: 'text', x: 66, y: 33, text: '2.4 GHz · PWM/PPM/iBUS', size: 5, fill: '#bbb' }, { t: 'led', key: 'link', x: 106, y: 12, color: '#ef4444' }],
+    label: false, keywords: 'receiver penerima remote rc flysky fs-ia6b fs-i6 ppm ibus pwm drone transmitter',
+    pinDesc: { CH1: 'Roll / aileron (PPM bila mode PPM)', CH2: 'Pitch / elevator', CH3: 'Throttle', CH4: 'Yaw / rudder', CH5: 'Saklar SWA (arm)', CH6: 'Saklar SWB (mode)', IBUS: 'Keluaran iBUS (UART 115200, 14 kanal)' },
+    props: [{ key: 'mode', label: 'Keluaran CH1', type: 'select', options: ['PWM (CH1–CH6)', 'PPM (8 kanal di CH1)'], def: 'PWM (CH1–CH6)' }] },
+  { tag: 'mod-lipo', name: 'Baterai LiPo (1S–6S)', cat: 'Daya', sim: 'full', w: 160, h: 64, color: '#1f2937', rx: 8, pins: { r: ['+', '-'] },
+    deco: [{ t: 'rect', x: 8, y: 8, w: 120, h: 48, fill: '#facc15', rx: 4 }, { t: 'text', key: 'cap', x: 68, y: 24, text: 'LiPo 3S 2200mAh', size: 8, fill: '#111', bold: true }, { t: 'text', key: 'v', x: 68, y: 38, text: '12.6 V', size: 9, fill: '#111', bold: true }, { t: 'text', key: 'soc', x: 68, y: 50, text: '100 %', size: 7, fill: '#333' }],
+    label: false, keywords: 'lipo baterai battery 1s 2s 3s 4s 6s drone xt60 lithium polymer',
+    pinDesc: { '+': 'XT60 + (merah)', '-': 'XT60 − (hitam)' },
+    props: [{ key: 'cells', label: 'Jumlah sel', type: 'select', options: ['1S', '2S', '3S', '4S', '6S'], def: '3S' },
+      { key: 'capacity', label: 'Kapasitas (mAh)', type: 'select', options: ['250', '500', '1000', '1500', '2200', '3000', '5000'], def: '2200' },
+      { key: 'crate', label: 'Rating discharge', type: 'select', options: ['25C', '45C', '75C'], def: '25C' },
+      { key: 'charge', label: 'Isi awal', type: 'range', min: 0, max: 100, step: 1, def: 100, unit: ' %' }] },
+  { tag: 'mod-vl53l0x', name: 'LIDAR ToF VL53L0X (I2C, 2 m)', cat: 'Sensor', sim: 'full', w: 70, h: 56, color: purple, pins: { b: ['VIN', 'GND', 'SCL', 'SDA', 'GPIO1', 'XSHUT'] },
+    deco: [{ t: 'rect', x: 26, y: 8, w: 18, h: 10, fill: '#111', rx: 2 }, { t: 'circle', x: 31, y: 13, r: 2.5, fill: '#444' }, { t: 'circle', x: 39, y: 13, r: 2.5, fill: '#444' }], label: 'VL53L0X', ly: 30, lsize: 7, vlabels: true,
+    keywords: 'lidar tof laser jarak distance vl53l0x vl53 time of flight drone altitude',
+    props: [{ key: 'distance', label: 'Jarak benda', type: 'range', min: 20, max: 2200, step: 5, def: 500, unit: ' mm' },
+      { key: 'drone', label: 'Bila ada frame drone', type: 'select', options: ['ikut drone (menghadap bawah)', 'tidak (jarak manual)'], def: 'ikut drone (menghadap bawah)' }] },
+  { tag: 'mod-tfluna', name: 'LIDAR TF-Luna (UART, 8 m)', cat: 'Sensor', sim: 'full', w: 86, h: 60, color: '#111827', rx: 6, pins: { l: ['5V', 'RXD', 'TXD', 'GND'] },
+    deco: [{ t: 'circle', x: 46, y: 24, r: 9, fill: '#1e3a8a', stroke: '#64748b' }, { t: 'circle', x: 68, y: 24, r: 9, fill: '#1e3a8a', stroke: '#64748b' }], label: 'TF-Luna', lx: 57, ly: 50, lsize: 7,
+    keywords: 'lidar tf-luna tfluna tfmini benewake laser jarak 8m uart drone altitude',
+    pinDesc: { '5V': 'Daya 5 V', RXD: 'Masuk data (ke TX mikrokontroler)', TXD: 'Keluar data 115200 baud (ke RX mikrokontroler)', GND: 'Ground' },
+    props: [{ key: 'distance', label: 'Jarak benda', type: 'range', min: 10, max: 900, step: 1, def: 150, unit: ' cm' },
+      { key: 'drone', label: 'Bila ada frame drone', type: 'select', options: ['ikut drone (menghadap bawah)', 'tidak (jarak manual)'], def: 'ikut drone (menghadap bawah)' }] },
+];
+
 export const MODULE_SPECS = [
   // ===================== Microcontrollers (design + wiring check; code is not executed)
   { tag: 'mod-esp32-cam', name: 'ESP32-CAM (AI-Thinker)', cat: 'Mikrokontroler', sim: 'full', runtime: 'wasm', wasm: 'esp32', board: 'esp32', mcu: 'ESP32', w: 104, h: 156, color: '#202b3d',
@@ -169,7 +239,8 @@ export const MODULE_SPECS = [
   { tag: 'mod-bmp280', name: 'BMP280 (tekanan udara, I2C)', cat: 'Sensor', sim: 'full', w: 70, h: 54, color: purple, pins: { t: ['VCC', 'GND', 'SCL', 'SDA', 'CSB', 'SDO'] },
     deco: [...chip(28, 26, 14, 12)], label: 'BMP280', ly: 48, lsize: 6, keywords: 'tekanan pressure altitude barometer i2c',
     props: [{ key: 'temperature', label: 'Suhu', type: 'range', min: -40, max: 85, step: 0.5, def: 24, unit: ' °C' }, { key: 'pressure', label: 'Tekanan', type: 'range', min: 300, max: 1100, step: 1, def: 1013, unit: ' hPa' },
-      { key: 'address', label: 'Alamat I2C', type: 'select', options: ['0x76', '0x77'], def: '0x76' }] },
+      { key: 'address', label: 'Alamat I2C', type: 'select', options: ['0x76', '0x77'], def: '0x76' },
+      { key: 'drone', label: 'Bila ada frame drone', type: 'select', options: ['ikut drone (tekanan dari ketinggian)', 'tidak (nilai manual)'], def: 'ikut drone (tekanan dari ketinggian)' }] },
   { tag: 'mod-bme280', name: 'BME280 (suhu, RH, tekanan)', cat: 'Sensor', sim: 'full', w: 56, h: 54, color: purple, pins: { t: ['VIN', 'GND', 'SCL', 'SDA'] }, deco: [...chip(21, 26, 14, 12)], label: 'BME280', ly: 48, lsize: 6, keywords: 'humidity pressure i2c',
     props: [{ key: 'temperature', label: 'Suhu', type: 'range', min: -40, max: 85, step: 0.5, def: 24, unit: ' °C' }, { key: 'humidity', label: 'Kelembapan', type: 'range', min: 0, max: 100, step: 1, def: 50, unit: ' %' },
       { key: 'pressure', label: 'Tekanan', type: 'range', min: 300, max: 1100, step: 1, def: 1013, unit: ' hPa' }, { key: 'address', label: 'Alamat I2C', type: 'select', options: ['0x76', '0x77'], def: '0x76' }] },
@@ -326,6 +397,9 @@ export const MODULE_SPECS = [
       { key: 'rating', label: 'Rating tegangan (V)', type: 'select', options: ['6.3', '10', '16', '25', '35', '50'], def: '16' }] },
   { tag: 'mod-diode', name: 'Dioda 1N4007', cat: 'Pasif & Dasar', sim: 'full', w: 70, h: 20, color: '#1b1b1b', rx: 3, pins: { l: ['A'], r: ['K'] }, deco: [{ t: 'rect', x: 50, y: 0, w: 5, h: 20, fill: '#ccc', rx: 0 }], label: false, keywords: 'diode dioda penyearah flyback schottky',
     props: [{ key: 'vf', label: 'Tegangan maju Vf (V)', type: 'select', options: ['0.3', '0.6', '0.7', '1.0'], def: '0.7' }] },
+  // ===================== Motors, drone, LiPo, LIDAR
+  ...DRONE_SPECS,
 ];
+
 
 export function registerModules() { for (const s of MODULE_SPECS) defineModule(s); }

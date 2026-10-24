@@ -15,6 +15,12 @@ CORE_DIR = os.path.join(CORE, "cores", "arduino")
 
 # library header -> library source root (dirs added to include path)
 LIBS = {
+    "VL53L0X.h": os.path.join(SRC, "vl53l0x-arduino"),
+    "Adafruit_VL53L0X.h": os.path.join(SRC, "Adafruit_VL53L0X", "src"),
+    "TFMPlus.h": os.path.join(SRC, "TFMini-Plus", "src"),
+    "IBusBM.h": os.path.join(SRC, "IBusBM", "src"),
+    "Adafruit_MPU6050.h": os.path.join(SRC, "Adafruit_MPU6050"),
+    "MPU6050_light.h": os.path.join(SRC, "MPU6050_light", "src"),
     "Servo.h": os.path.join(SRC, "Servo", "src"),
     "LiquidCrystal.h": os.path.join(SRC, "LiquidCrystal", "src"),
     "Adafruit_NeoPixel.h": os.path.join(SRC, "Adafruit_NeoPixel"),
@@ -60,7 +66,7 @@ DEPS = {
     "DallasTemperature.h": ["OneWire.h"],
     "Adafruit_BMP280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"],
     "Adafruit_BME280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"],
-    "MAX30105.h": ["Wire.h"],
+    "MAX30105.h": ["Wire.h"], "VL53L0X.h": ["Wire.h"], "Adafruit_VL53L0X.h": ["Wire.h"], "Adafruit_MPU6050.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"], "MPU6050_light.h": ["Wire.h"],
     "MD_Parola.h": ["MD_MAX72xx.h", "SPI.h"], "Adafruit_ILI9341.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h", "SPI.h", "Wire.h"], "MD_MAX72xx.h": ["SPI.h"], "SD.h": ["SPI.h"], "MFRC522.h": ["SPI.h"], "RF24.h": ["SPI.h"], "LoRa.h": ["SPI.h"],
 }
 
@@ -198,7 +204,7 @@ def preprocess(sketch):
     clean = _strip(sketch)
     # top-level declarations only (brace depth 0)
     depth, protos = 0, []
-    pos = 0
+    first_fn = None                                   # offset of the first function definition (prototypes go just above it, like arduino-builder)
     for m in re.finditer(r"[{}]|" + _DECL.pattern, clean, re.M):
         if m.group(0) == "{":
             depth += 1; continue
@@ -209,6 +215,8 @@ def preprocess(sketch):
             name = m.group(2)
             if name not in _SKIP and not re.match(r"\s*(struct|class|enum|union|namespace|typedef)\b", m.group(0)):
                 protos.append(re.sub(r"\s+", " ", m.group(1)).strip() + " " + name + "(" + re.sub(r"\s+", " ", m.group(3)).strip() + ");")
+                if first_fn is None:
+                    first_fn = m.start() + (len(m.group(0)) - len(m.group(0).lstrip()))
         depth += 1  # the "{" that ended the declaration
     # insert prototypes before first non-preprocessor, non-comment code line
     lines = sketch.split("\n")
@@ -219,6 +227,8 @@ def preprocess(sketch):
         if t and not t.startswith("#"):
             ins = i; break
         ins = i + 1
+    if first_fn is not None:                          # after the user's own types / globals (struct Pid {...}; float pid(Pid &p))
+        ins = max(ins, clean.count("\n", 0, first_fn))
     head = "\n".join(lines[:ins])
     tail = "\n".join(lines[ins:])
     return ('#include <Arduino.h>\n' + head + "\n" + "\n".join(dict.fromkeys(protos)) + '\n#line %d "sketch.ino"\n' % (ins + 1) + tail + "\n"), \

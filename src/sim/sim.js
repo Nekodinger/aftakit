@@ -7,6 +7,8 @@ import { Circuit } from './circuit.js';
 import { BEHAVIORS as B1 } from './behaviors.js';
 import { BEHAVIORS2 } from './behaviors2.js';
 import { I2C_BEHAVIORS } from './i2cParts.js';
+import { DRONE_BEHAVIORS } from './drone.js';
+import { LIDAR_BEHAVIORS } from './lidar.js';
 import { BEHAVIORS3 } from './behaviors3.js';
 import { BEHAVIORS4 } from './behaviors4.js';
 import { BEHAVIORS5 } from './behaviors5.js';
@@ -18,7 +20,7 @@ import { softSerialMonitor, attachPinI2C } from './pinbus.js';
 import { Audio } from './audio.js';
 import { BY_TAG } from '../catalog.js';
 
-const BEHAVIORS = { ...B1, ...BEHAVIORS2, ...BEHAVIORS3, ...BEHAVIORS4, ...BEHAVIORS5, ...BEHAVIORS6, ...I2C_BEHAVIORS, 'mod-jsn-sr04t': B1['wokwi-hc-sr04'] };
+const BEHAVIORS = { ...B1, ...BEHAVIORS2, ...BEHAVIORS3, ...BEHAVIORS4, ...BEHAVIORS5, ...BEHAVIORS6, ...I2C_BEHAVIORS, ...DRONE_BEHAVIORS, ...LIDAR_BEHAVIORS, 'mod-jsn-sr04t': B1['wokwi-hc-sr04'] };
 // firmware that just idles (rjmp .-2): used when the circuit has no runnable microcontroller
 export const IDLE_HEX = ':02000000FFCF30\n:00000001FF\n';
 
@@ -101,6 +103,8 @@ export class Simulator {
         return { t: +(p.attrs?.temperature ?? 28), h: +(p.attrs?.humidity ?? 65) };
       },
       pulseIn(name, state, timeout) {
+        const rx = partsOn(netOf(name)).find((m) => partById(m.id)?.type === 'mod-rc-rx' && /^CH\d$/.test(m.pin));
+        if (rx) { const b = sim.behaviors.find((x) => x._part.id === rx.id); const us = state ? b?.pulseFor(rx.pin) || 0 : 0; return us > timeout ? 0 : us; }
         const hit = partsOn(netOf(name)).find((m) => ['wokwi-hc-sr04', 'mod-jsn-sr04t'].includes(partById(m.id)?.type) && m.pin === 'ECHO');
         if (!hit) return 0;
         const p = partById(hit.id);
@@ -221,7 +225,7 @@ export class Simulator {
     }
 
     // behaviours
-    this._ow = null; this._air = null; this._ir = null; this.btModules = []; this.ftdiPorts = []; this._hostSvc = null;
+    this._ow = null; this._air = null; this._ir = null; this.btModules = []; this.ftdiPorts = []; this._hostSvc = null; this._phys = null; this.drone = null;
     this.behaviors = [];
     for (const p of model.parts) {
       const factory = BEHAVIORS[p.type];
@@ -256,7 +260,7 @@ export class Simulator {
       if (BY_TAG[p.type]?.board || BY_TAG[p.type]?.breadboard) continue;
       const el = els.get(p.id);
       const any = (el?.pinInfo || []).some((x) => this.circuit.isWired(p.id, x.name));
-      if (!any && BEHAVIORS[p.type]) pf(`${p.id}: belum ada kabel yang terhubung.`);
+      if (!any && BEHAVIORS[p.type] && el?.pinInfo?.length) pf(`${p.id}: belum ada kabel yang terhubung.`);
       if (BY_TAG[p.type]?.sim === 'visual') pf(`${p.id} (${BY_TAG[p.type].name}) hanya tampilan, tidak ikut disimulasikan.`);
     }
     this.diag = diag;
