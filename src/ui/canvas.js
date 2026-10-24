@@ -382,14 +382,17 @@ export class CircuitCanvas {
     vp.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch') { touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (touches.size === 2) { startPinch(); return; } if (touches.size > 2) return; }
       // fingers are imprecise: snap a touch to the nearest pin within ~16 screen px
-      const pinEl = e.pointerType === 'touch' ? this._nearestPinEl(e.clientX, e.clientY, 16) || e.target.closest?.('.pin') : e.target.closest?.('.pin');
-      const partEl = e.target.closest?.('.part');
+      // the pin layer lies above every part, so breadboard holes hidden under a component's body would steal the
+      // click; a component on top of the breadboard owns the area it covers
+      const cover = this._componentUnder(e.clientX, e.clientY);
+      let pinEl = e.pointerType === 'touch' ? this._nearestPinEl(e.clientX, e.clientY, 16, !!cover) || e.target.closest?.('.pin') : e.target.closest?.('.pin');
+      if (pinEl && cover && pinEl.dataset.pid !== cover.dataset.id && isBB(this.parts.get(pinEl.dataset.pid)?.type)) pinEl = null;
+      const partEl = e.target.closest?.('.part') || (pinEl ? null : cover);
       // "Geser" mode: a hole of a breadboard grabs the breadboard itself (unless a wire is waiting for its end point)
       const bbHole = pinEl && !this.pending && this.bbMode === 'move' && isBB(this.parts.get(pinEl.dataset.pid)?.type) ? this.parts.get(pinEl.dataset.pid) : null;
       if (bbHole && e.button === 0) {
         this.select({ kind: 'part', id: bbHole.id }); vp.focus({ preventScroll: true }); this.pinTip.hidden = true;
-        const others = this.pluggedInto(bbHole.id).map((id) => this.parts.get(id)).filter(Boolean).map((p) => ({ p, l: p.left, t: p.top }));
-        drag = { part: bbHole, sx: e.clientX, sy: e.clientY, l: bbHole.left, t: bbHole.top, moved: false, others }; vp.setPointerCapture(e.pointerId);
+        drag = { part: bbHole, sx: e.clientX, sy: e.clientY, l: bbHole.left, t: bbHole.top, moved: false, others: [] }; vp.setPointerCapture(e.pointerId);
         e.preventDefault(); return;
       }
       if (pinEl && e.button === 0 && !(this.interactive && !this.pending && partEl)) { e.preventDefault(); this._pinDown(pinEl); if (this.pending) { this.pending.sx = e.clientX; this.pending.sy = e.clientY; } this._showTip(pinEl); return; }
@@ -401,8 +404,8 @@ export class CircuitCanvas {
         const part = this.parts.get(partEl.dataset.id); this.select({ kind: 'part', id: part.id }); vp.focus({ preventScroll: true });
         const onGrip = e.target.classList?.contains('grip');
         if (!this.interactive || onGrip || isBB(part.type)) {
-          const others = isBB(part.type) ? this.pluggedInto(part.id).map((id) => this.parts.get(id)).filter(Boolean).map((p) => ({ p, l: p.left, t: p.top })) : [];
-          drag = { part, sx: e.clientX, sy: e.clientY, l: part.left, t: part.top, moved: false, others }; vp.setPointerCapture(e.pointerId);
+          // every part moves on its own: a breadboard does not drag its components along (contacts are re-made from geometry)
+          drag = { part, sx: e.clientX, sy: e.clientY, l: part.left, t: part.top, moved: false, others: [] }; vp.setPointerCapture(e.pointerId);
           e.preventDefault();
         }
       }
@@ -436,7 +439,7 @@ export class CircuitCanvas {
       if (e.pointerType === 'touch') { touches.delete(e.pointerId); if (pinch) { if (touches.size < 2) pinch = null; return; } }
       if (pan) { pan = null; vp.classList.remove('grabbing'); }
       if (drag) {
-        if (drag.moved) { if (!isBB(drag.part.type)) this._plug(drag.part, true); this.emit('change', { structural: false }); }
+        if (drag.moved) { this._plug(drag.part, !isBB(drag.part.type)); this._markWired(); this._redrawWires(); this.emit('change', { structural: false }); }
         drag = null;
       }
       if (this.pending?.dragging) {
@@ -459,9 +462,20 @@ export class CircuitCanvas {
     });
   }
 
-  _nearestPinEl(cx, cy, radius) {
+  /** the topmost non-breadboard component whose body is under a screen point (null = none) */
+  _componentUnder(cx, cy) {
+    for (const el of document.elementsFromPoint(cx, cy)) {
+      const pe = el.closest?.('.part'); if (!pe) continue;
+      const part = this.parts.get(pe.dataset.id);
+      if (part && !isBB(part.type)) return pe;
+    }
+    return null;
+  }
+
+  _nearestPinEl(cx, cy, radius, skipBB = false) {
     const w = this.toWorld(cx, cy), r = radius / this.zoom; let best = null, bd = r;
     for (const part of this.parts.values()) {
+      if (skipBB && isBB(part.type)) continue;
       const [pw, ph] = part.size; const m = r + 4;
       if (w.x < part.left - m || w.y < part.top - m || w.x > part.left + Math.max(pw, ph) + m || w.y > part.top + Math.max(pw, ph) + m) continue;
       for (const info of part.pinInfo) {
