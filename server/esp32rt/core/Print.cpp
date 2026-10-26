@@ -25,7 +25,7 @@
 #include "Print.h"
 #include <stdarg.h>
 
-using namespace arduino;
+
 
 // Public Methods //////////////////////////////////////////////////////////////
 

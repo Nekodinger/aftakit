@@ -30,7 +30,7 @@
 #define OCT 8
 #define BIN 2
 
-namespace arduino {
+/* (global namespace; was namespace arduino) */
 
 class Print
 {
@@ -94,5 +94,4 @@ class Print
     virtual void flush() { /* Empty implementation for backward compatibility */ }
 };
 
-}
-using arduino::Print;
+/* end */

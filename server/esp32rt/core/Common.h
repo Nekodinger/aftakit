@@ -1,5 +1,8 @@
 // Arduino core API (ESP32 flavour) for the browser simulator.
 #pragma once
+#ifdef __cplusplus
+namespace arduino {}   // the core lives in the global namespace (like arduino-esp32); kept for `using namespace arduino`
+#endif
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>

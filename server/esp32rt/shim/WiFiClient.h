@@ -5,7 +5,7 @@
 #include "Arduino.h"
 #include "Client.h"
 #include "IPAddress.h"
-class WiFiClient : public arduino::Client {
+class WiFiClient : public Client {
 public:
   WiFiClient() {}
   ~WiFiClient() {}
@@ -70,7 +70,7 @@ namespace BearSSL { typedef WiFiClientSecure WiFiClientSecure; class X509List { 
 
 // ---------------------------------------------------------------- UDP (NTP, DNS, CoAP through the gateway)
 #include "Udp.h"
-class WiFiUDP : public arduino::UDP {
+class WiFiUDP : public UDP {
 public:
   uint8_t begin(uint16_t port) override { _local = port; if (!_s) _s = ++_next; return 1; }
   uint8_t begin(IPAddress, uint16_t port) { return begin(port); }

@@ -31,7 +31,7 @@ class EthernetClass;
 class DhcpClass;
 class DNSClient;
 
-namespace arduino {
+/* (global namespace; was namespace arduino) */
 
 // A class to make it easier to handle and pass around IP addresses
 
@@ -117,6 +117,4 @@ protected:
 
 extern const IPAddress IN6ADDR_ANY;
 extern const IPAddress INADDR_NONE;
-}
-
-using arduino::IPAddress;
+/* end */

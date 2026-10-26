@@ -34,7 +34,7 @@
 readBytesBetween( pre_string, terminator, buffer, length)
 */
 
-namespace arduino {
+/* (global namespace; was namespace arduino) */
 
 // This enumeration provides the lookahead options for parseInt(), parseFloat()
 // The rules set out here are used until either the first valid character is found
@@ -128,6 +128,4 @@ class Stream : public Print
 
 #undef NO_IGNORE_CHAR
 
-}
-
-using arduino::Stream;
+/* end */

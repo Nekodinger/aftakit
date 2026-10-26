@@ -33,9 +33,19 @@ for r in arduino/ArduinoCore-avr arduino-libraries/Servo arduino-libraries/Liqui
          PaulStoffregen/OneWire milesburton/Arduino-Temperature-Control-Library avishorp/TM1637 bogde/HX711 \
          adafruit/Adafruit_BMP280_Library adafruit/Adafruit_BME280_Library sparkfun/SparkFun_MAX3010x_Sensor_Library \
          wayoda/LedControl MajicDesigns/MD_MAX72XX MajicDesigns/MD_Parola adafruit/Adafruit_ILI9341 arduino-libraries/SD miguelbalboa/rfid SpenceKonde/ATTinyCore nRF24/RF24 sandeepmistry/arduino-LoRa mikalhart/TinyGPSPlus Arduino-IRremote/Arduino-IRremote \
-         pololu/vl53l0x-arduino adafruit/Adafruit_VL53L0X budryerson/TFMini-Plus bmellink/IBusBM adafruit/Adafruit_MPU6050 rfetick/MPU6050_light GeorgK/MQ135 miguel5612/MQSensorsLib; do
+         pololu/vl53l0x-arduino adafruit/Adafruit_VL53L0X budryerson/TFMini-Plus bmellink/IBusBM adafruit/Adafruit_MPU6050 rfetick/MPU6050_light GeorgK/MQ135 miguel5612/MQSensorsLib \
+         olikraus/U8g2_Arduino arduino-libraries/Stepper waspinator/AccelStepper Chris--A/Keypad mathertel/RotaryEncoder beegee-tokyo/DHTesp \
+         ElectronicCats/mpu6050 DFRobot/GravityTDS DFRobot/DFRobot_PH GreenPonik/DFRobot_ESP_PH_WITH_ADC_BY_GREENPONIK GreenPonik/DFRobot_ESP_EC_BY_GREENPONIK \
+         AndreaLombardo/L298N vshymanskyy/TinyGSM RobTillaart/ACS712 blynkkk/blynk-library witnessmenow/Universal-Arduino-Telegram-Bot knolleary/pubsubclient \
+         mathworks/thingspeak-arduino adafruit/Adafruit_ADS1X15 claws/BH1750; do
   [ -d "$(basename $r)" ] || git clone -q --depth 1 "https://github.com/$r.git"
 done
+# pinned / renamed: FastLED 3.6 (AVR; the WebAssembly build uses server/esp32rt/FastLED)
+[ -d FastLED ] || git clone -q --depth 1 --branch 3.6.0 https://github.com/FastLED/FastLED.git
+bash ../esp32rt/fastled_sim/make.sh FastLED   # FastLED + simulator platform for the WebAssembly boards -> server/esp32rt/FastLED
+# keep only what is compiled: drop documents / pictures that some libraries ship (TFMini-Plus has 16 MB of PDFs)
+find . \( -iname '*.pdf' -o -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.bmp' -o -iname '*.zip' \) -delete 2>/dev/null || true
+rm -rf TFMini-Plus/documents FastLED/docs FastLED/ci U8g2_Arduino/extras
 rm -rf */.git ATTinyCore/avr/bootloaders ATTinyCore/avr/extras
 # examples / docs / host-side tools are never compiled: keep the packed sources small
 find . -mindepth 2 -type d \( -name examples -o -name docs -o -name extras -o -name images -o -name datasheets -o -name examples_linux \

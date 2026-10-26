@@ -22,7 +22,7 @@
 #include "Stream.h"
 #include "IPAddress.h"
 
-namespace arduino {
+/* (global namespace; was namespace arduino) */
 
 class Client : public Stream {
 
@@ -43,4 +43,5 @@ protected:
   uint8_t* rawIPAddress(IPAddress& addr) { return addr.raw_address(); };
 };
 
-}
+/* end */
+namespace arduino { using ::Client; }

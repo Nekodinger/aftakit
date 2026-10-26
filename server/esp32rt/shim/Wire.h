@@ -1,7 +1,7 @@
 #pragma once
 #include "Arduino.h"
 #define I2C_BUFFER_LENGTH 128
-class TwoWire : public arduino::Stream {
+class TwoWire : public Stream {
 public:
   TwoWire(int bus) : _bus(bus) {}
   bool begin(int sda = -1, int scl = -1, uint32_t freq = 0);
@@ -23,7 +23,7 @@ public:
   uint8_t requestFrom(int addr, int len, int stop) { return (uint8_t)requestFrom((uint16_t)addr, (size_t)len, (bool)stop); }
   size_t write(uint8_t b) override { if (_txLen < I2C_BUFFER_LENGTH) { _txBuf[_txLen++] = b; return 1; } return 0; }
   size_t write(const uint8_t *d, size_t n) override { size_t k = 0; while (k < n && write(d[k])) k++; return k; }
-  using arduino::Print::write;
+  using Print::write;
   int available() override { return _rxLen - _rxPos; }
   int read() override { return _rxPos < _rxLen ? _rxBuf[_rxPos++] : -1; }
   int peek() override { return _rxPos < _rxLen ? _rxBuf[_rxPos] : -1; }

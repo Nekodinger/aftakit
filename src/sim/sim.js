@@ -100,7 +100,7 @@ export class Simulator {
         const p = partById(hit.id);
         if (!powered(p.id, ['VCC'], ['GND'])) { sim.warn(`dht-pw-${p.id}`, `${p.id}: tidak mendapat daya. Hubungkan VCC ke 3V3/5V dan GND ke GND.`); return null; }
         const real = p.type === 'mod-dht11' ? 11 : 22;
-        if (type !== real && !(type === 21 && real === 22)) sim.warn(`dht-type-${p.id}`, `${p.id} adalah DHT${real}, tetapi kode memakai DHT${type}. Pembacaan sensor asli akan salah; ubah tipe di kode.`);
+        if (type && type !== real && !(type === 21 && real === 22)) sim.warn(`dht-type-${p.id}`, `${p.id} adalah DHT${real}, tetapi kode memakai DHT${type}. Pembacaan sensor asli akan salah; ubah tipe di kode.`);
         return { t: +(p.attrs?.temperature ?? 28), h: +(p.attrs?.humidity ?? 65) };
       },
       pulseIn(name, state, timeout) {

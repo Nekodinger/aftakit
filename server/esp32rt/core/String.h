@@ -33,7 +33,7 @@
 #include "deprecated-avr-comp/avr/pgmspace.h"
 #endif
 
-namespace arduino {
+/* (global namespace; was namespace arduino) */
 
 // When compiling programs with this class, the following gcc parameters
 // dramatically increase performance and memory (RAM) efficiency, typically
@@ -246,10 +246,8 @@ public:
     StringSumHelper(double num) : String(num) {}
 };
 
-} // namespace arduino
+/* end */ // namespace arduino
 
-using arduino::__FlashStringHelper;
-using arduino::String;
 
 #endif  // __cplusplus
 #endif  // __ARDUINO_STRINGS__

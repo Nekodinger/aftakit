@@ -2,7 +2,7 @@
 // Classic Bluetooth SPP: the simulator shows a "phone" terminal; text sent from it arrives here.
 #include "Arduino.h"
 typedef void (*BTDataCb)(const uint8_t *, size_t);
-class BluetoothSerial : public arduino::Stream {
+class BluetoothSerial : public Stream {
 public:
   bool begin(const String &name = "ESP32", bool isMaster = false) { h_bt_begin(name.c_str()); return true; }
   bool begin(const char *name, bool isMaster = false) { h_bt_begin(name); return true; }
@@ -11,7 +11,7 @@ public:
   int read() override { if (_pk >= 0) { int c = _pk; _pk = -1; return c; } return h_bt_read(); }
   size_t write(uint8_t c) override { h_bt_write(&c, 1); return 1; }
   size_t write(const uint8_t *b, size_t n) override { h_bt_write(b, (int)n); return n; }
-  using arduino::Print::write;
+  using Print::write;
   void flush() override {}
   void end() {}
   bool hasClient() { return true; }

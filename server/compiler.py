@@ -15,6 +15,40 @@ CORE_DIR = os.path.join(CORE, "cores", "arduino")
 
 # library header -> library source root (dirs added to include path)
 LIBS = {
+    "FastLED.h": os.path.join(SRC, "FastLED", "src"),
+    "U8g2lib.h": os.path.join(SRC, "U8g2_Arduino", "src"),
+    "U8x8lib.h": os.path.join(SRC, "U8g2_Arduino", "src"),
+    "Stepper.h": os.path.join(SRC, "Stepper", "src"),
+    "AccelStepper.h": os.path.join(SRC, "AccelStepper", "src"),
+    "MultiStepper.h": os.path.join(SRC, "AccelStepper", "src"),
+    "Keypad.h": os.path.join(SRC, "Keypad", "src"),
+    "RotaryEncoder.h": os.path.join(SRC, "RotaryEncoder", "src"),
+    "NewPing.h": os.path.join(HERE, "libs", "NewPing"),            # pulseIn-based NewPing 1.9 API (portable)
+    "DHTesp.h": os.path.join(SRC, "DHTesp"),
+    "MPU6050.h": os.path.join(SRC, "mpu6050", "src"),
+    "I2Cdev.h": os.path.join(SRC, "mpu6050", "src"),
+    "MPU6050_6Axis_MotionApps20.h": os.path.join(SRC, "mpu6050", "src"),
+    "MPU6050_6Axis_MotionApps612.h": os.path.join(SRC, "mpu6050", "src"),
+    "GravityTDS.h": os.path.join(SRC, "GravityTDS"),
+    "DFRobot_PH.h": os.path.join(SRC, "DFRobot_PH"),
+    "DFRobot_ESP_PH_WITH_ADC.h": os.path.join(SRC, "DFRobot_ESP_PH_WITH_ADC_BY_GREENPONIK", "src"),
+    "DFRobot_ESP_EC.h": os.path.join(SRC, "DFRobot_ESP_EC_BY_GREENPONIK", "src"),
+    "L298N.h": os.path.join(SRC, "L298N", "src"),
+    "L298NX2.h": os.path.join(SRC, "L298N", "src"),
+    "TinyGsmClient.h": os.path.join(SRC, "TinyGSM", "src"),
+    "TinyGSM.h": os.path.join(SRC, "TinyGSM", "src"),
+    "ACS712.h": os.path.join(SRC, "ACS712"),
+    "BlynkSimpleEsp32.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleEsp8266.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleShieldEsp8266.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleStream.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleWifi.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleWiFiNINA.h": os.path.join(SRC, "blynk-library", "src"),
+    "UniversalTelegramBot.h": os.path.join(SRC, "Universal-Arduino-Telegram-Bot", "src"),
+    "PubSubClient.h": os.path.join(SRC, "pubsubclient", "src"),
+    "ThingSpeak.h": os.path.join(SRC, "thingspeak-arduino", "src"),
+    "Adafruit_ADS1X15.h": os.path.join(SRC, "Adafruit_ADS1X15"),
+    "BH1750.h": os.path.join(SRC, "BH1750", "src"),
     "MQ135.h": os.path.join(SRC, "MQ135"),
     "MQUnifiedsensor.h": os.path.join(SRC, "MQSensorsLib", "src"),
     "VL53L0X.h": os.path.join(SRC, "vl53l0x-arduino"),
@@ -68,7 +102,7 @@ DEPS = {
     "DallasTemperature.h": ["OneWire.h"],
     "Adafruit_BMP280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"],
     "Adafruit_BME280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"],
-    "MAX30105.h": ["Wire.h"], "VL53L0X.h": ["Wire.h"], "Adafruit_VL53L0X.h": ["Wire.h"], "Adafruit_MPU6050.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"], "MPU6050_light.h": ["Wire.h"],
+    "MAX30105.h": ["Wire.h"], "U8g2lib.h": ["SPI.h", "Wire.h"], "U8x8lib.h": ["SPI.h", "Wire.h"], "MPU6050.h": ["Wire.h"], "I2Cdev.h": ["Wire.h"], "MPU6050_6Axis_MotionApps20.h": ["Wire.h"], "MPU6050_6Axis_MotionApps612.h": ["Wire.h"], "GravityTDS.h": ["EEPROM.h"], "DFRobot_PH.h": ["EEPROM.h"], "Adafruit_ADS1X15.h": ["Adafruit_I2CDevice.h", "Wire.h", "SPI.h"], "BH1750.h": ["Wire.h"], "BlynkSimpleShieldEsp8266.h": ["SoftwareSerial.h"], "BlynkSimpleStream.h": [], "TinyGsmClient.h": ["SoftwareSerial.h"], "VL53L0X.h": ["Wire.h"], "Adafruit_VL53L0X.h": ["Wire.h"], "Adafruit_MPU6050.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"], "MPU6050_light.h": ["Wire.h"],
     "MD_Parola.h": ["MD_MAX72xx.h", "SPI.h"], "Adafruit_ILI9341.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h", "SPI.h", "Wire.h"], "MD_MAX72xx.h": ["SPI.h"], "SD.h": ["SPI.h"], "MFRC522.h": ["SPI.h"], "RF24.h": ["SPI.h"], "LoRa.h": ["SPI.h"],
 }
 
@@ -215,7 +249,8 @@ def preprocess(sketch):
         # a decl match consumed its own "{": account for it after test
         if depth == 0 and m.lastindex:
             name = m.group(2)
-            if name not in _SKIP and not re.match(r"\s*(struct|class|enum|union|namespace|typedef)\b", m.group(0)):
+            # like arduino-builder: no prototype for functions with default arguments (the definition already declares them)
+            if name not in _SKIP and "=" not in m.group(3) and not re.match(r"\s*(struct|class|enum|union|namespace|typedef)\b", m.group(0)):
                 protos.append(re.sub(r"\s+", " ", m.group(1)).strip() + " " + name + "(" + re.sub(r"\s+", " ", m.group(3)).strip() + ");")
                 if first_fn is None:
                     first_fn = m.start() + (len(m.group(0)) - len(m.group(0).lstrip()))
@@ -259,7 +294,11 @@ def compile_sketch(sketch, board="uno"):
         extra_inc, lib_o = [], []
         for h in headers:
             extra_inc += [i for i in lib_incs(h, libs) if i not in extra_inc]
+        roots = set()
         for h in headers:
+            if os.path.realpath(libs[h]) in roots:      # several headers of one library (MPU6050.h + I2Cdev.h, U8g2lib.h + U8x8lib.h)
+                continue
+            roots.add(os.path.realpath(libs[h]))
             with _lock:
                 lib_o += lib_objs(h, extra_inc, prof, libs)
         cpp = os.path.join(work, "sketch.cpp")

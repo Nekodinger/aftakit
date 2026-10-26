@@ -27,7 +27,7 @@
 
 #define PARSE_TIMEOUT 1000  // default number of milli-seconds to wait
 
-using namespace arduino;
+
 
 // private method to read stream with timeout
 int Stream::timedRead()

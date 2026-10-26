@@ -26,7 +26,7 @@
 
 #include <float.h>
 
-namespace arduino {
+/* (global namespace; was namespace arduino) */
 
 /*********************************************/
 /*  Static Member Initialisation             */
@@ -747,4 +747,4 @@ double String::toDouble(void) const
 	return 0;
 }
 
-} // namespace arduino
+/* end */ // namespace arduino

@@ -37,7 +37,7 @@
 #include "Stream.h"
 #include "IPAddress.h"
 
-namespace arduino {
+/* (global namespace; was namespace arduino) */
 
 class UDP : public Stream {
 
@@ -87,6 +87,6 @@ protected:
   uint8_t* rawIPAddress(IPAddress& addr) { return addr.raw_address(); };
 };
 
-}
+/* end */
 
-using arduino::UDP;
+namespace arduino { using ::UDP; }

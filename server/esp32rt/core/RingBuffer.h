@@ -25,7 +25,7 @@
 #include <stdint.h>
 #include <string.h>
 
-namespace arduino {
+/* (global namespace; was namespace arduino) */
 
 // Define constants and variables for buffering incoming serial data.  We're
 // using a ring buffer (I think), in which head is the index of the location
@@ -136,7 +136,7 @@ bool RingBufferN<N>::isFull()
   return (_numElems == N);
 }
 
-}
+/* end */
 
 #endif /* _RING_BUFFER_ */
 #endif /* __cplusplus */

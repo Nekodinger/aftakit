@@ -22,16 +22,50 @@ SYSROOT = os.path.join(WASI, "share", "wasi-sysroot")
 TIMEOUT = int(os.environ.get("COMPILE_TIMEOUT", "300"))
 # parallel clang processes; set COMPILE_JOBS=1 on small (512 MB) free instances
 JOBS = max(1, int(os.environ.get("COMPILE_JOBS", "0")) or (os.cpu_count() or 1))
-BOARDS = {"esp32": ["-DESP32", "-DARDUINO_ARCH_ESP32", "-DARDUINO_ESP32_DEV", "-DSIM_BOARD_ESP32"],
-          "esp8266": ["-DESP8266", "-DARDUINO_ARCH_ESP8266", "-DARDUINO_ESP8266_NODEMCU", "-DSIM_BOARD_ESP8266", "-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "esp32rt", "shim8266")],
-          "rp2040": ["-DARDUINO_ARCH_RP2040", "-DARDUINO_RASPBERRY_PI_PICO", "-DSIM_BOARD_RP2040"],
-          "nanorp2040": ["-DARDUINO_ARCH_RP2040", "-DARDUINO_NANO_RP2040_CONNECT", "-DSIM_BOARD_NANORP2040"]}
+BOARDS = {"esp32": ["-DSIM_WASM", "-DESP32", "-DARDUINO_ARCH_ESP32", "-DARDUINO_ESP32_DEV", "-DSIM_BOARD_ESP32"],
+          "esp8266": ["-DSIM_WASM", "-DESP8266", "-DARDUINO_ARCH_ESP8266", "-DARDUINO_ESP8266_NODEMCU", "-DSIM_BOARD_ESP8266", "-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "esp32rt", "shim8266")],
+          "rp2040": ["-DSIM_WASM", "-DARDUINO_ARCH_RP2040", "-DARDUINO_RASPBERRY_PI_PICO", "-DSIM_BOARD_RP2040"],
+          "nanorp2040": ["-DSIM_WASM", "-DARDUINO_ARCH_RP2040", "-DARDUINO_NANO_RP2040_CONNECT", "-DSIM_BOARD_NANORP2040"]}
 COMMON = ["--target=wasm32-wasip1", "--sysroot=" + SYSROOT, "-O2", "-fno-exceptions", "-fno-rtti", "-D_WASI_EMULATED_SIGNAL",
           "-DARDUINO=10819", "-Wno-everything", "-ffunction-sections", "-fdata-sections"]
 CXXFLAGS = ["-std=gnu++17", "-fno-threadsafe-statics"] + COMMON
 INC = ["-I" + os.path.join(RT, "core"), "-I" + os.path.join(RT, "shim"), "-I" + os.path.join(RT, "ArduinoJson", "src")]
 # real third-party libraries compiled for the simulator (header -> source dir)
 LIBS = {
+    "FastLED.h": os.path.join(RT, "FastLED"),                # FastLED 3.6 with a simulator platform (platforms/sim)
+    "U8g2lib.h": os.path.join(SRC, "U8g2_Arduino", "src"),
+    "U8x8lib.h": os.path.join(SRC, "U8g2_Arduino", "src"),
+    "Stepper.h": os.path.join(SRC, "Stepper", "src"),
+    "AccelStepper.h": os.path.join(SRC, "AccelStepper", "src"),
+    "MultiStepper.h": os.path.join(SRC, "AccelStepper", "src"),
+    "Keypad.h": os.path.join(SRC, "Keypad", "src"),
+    "RotaryEncoder.h": os.path.join(SRC, "RotaryEncoder", "src"),
+    "NewPing.h": os.path.join(HERE, "libs", "NewPing"),            # pulseIn-based NewPing 1.9 API (portable)
+    "DHTesp.h": os.path.join(SRC, "DHTesp"),
+    "MPU6050.h": os.path.join(SRC, "mpu6050", "src"),
+    "I2Cdev.h": os.path.join(SRC, "mpu6050", "src"),
+    "MPU6050_6Axis_MotionApps20.h": os.path.join(SRC, "mpu6050", "src"),
+    "MPU6050_6Axis_MotionApps612.h": os.path.join(SRC, "mpu6050", "src"),
+    "GravityTDS.h": os.path.join(SRC, "GravityTDS"),
+    "DFRobot_PH.h": os.path.join(SRC, "DFRobot_PH"),
+    "DFRobot_ESP_PH_WITH_ADC.h": os.path.join(SRC, "DFRobot_ESP_PH_WITH_ADC_BY_GREENPONIK", "src"),
+    "DFRobot_ESP_EC.h": os.path.join(SRC, "DFRobot_ESP_EC_BY_GREENPONIK", "src"),
+    "L298N.h": os.path.join(SRC, "L298N", "src"),
+    "L298NX2.h": os.path.join(SRC, "L298N", "src"),
+    "TinyGsmClient.h": os.path.join(SRC, "TinyGSM", "src"),
+    "TinyGSM.h": os.path.join(SRC, "TinyGSM", "src"),
+    "ACS712.h": os.path.join(SRC, "ACS712"),
+    "BlynkSimpleEsp32.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleEsp8266.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleShieldEsp8266.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleStream.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleWifi.h": os.path.join(SRC, "blynk-library", "src"),
+    "BlynkSimpleWiFiNINA.h": os.path.join(SRC, "blynk-library", "src"),
+    "UniversalTelegramBot.h": os.path.join(SRC, "Universal-Arduino-Telegram-Bot", "src"),
+    "PubSubClient.h": os.path.join(SRC, "pubsubclient", "src"),
+    "ThingSpeak.h": os.path.join(SRC, "thingspeak-arduino", "src"),
+    "Adafruit_ADS1X15.h": os.path.join(SRC, "Adafruit_ADS1X15"),
+    "BH1750.h": os.path.join(SRC, "BH1750", "src"),
     "MQ135.h": os.path.join(SRC, "MQ135"),
     "MQUnifiedsensor.h": os.path.join(SRC, "MQSensorsLib", "src"),
     "VL53L0X.h": os.path.join(SRC, "vl53l0x-arduino"),
@@ -67,7 +101,7 @@ LIBS = {
     "TinyGPSPlus.h": os.path.join(SRC, "TinyGPSPlus", "src"),
     "SD.h": os.path.join(RT, "SD"),                       # Arduino SD with the generic pin map + ESP32 API extras
 }
-DEPS = {"Adafruit_MPU6050.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"], "Adafruit_GFX.h": ["Adafruit_I2CDevice.h"], "Adafruit_SSD1306.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "RTClib.h": ["Adafruit_I2CDevice.h"], "DallasTemperature.h": ["OneWire.h"], "MD_Parola.h": ["MD_MAX72xx.h"], "Adafruit_ILI9341.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "Adafruit_BMP280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"], "Adafruit_BME280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"]}
+DEPS = {"Adafruit_ADS1X15.h": ["Adafruit_I2CDevice.h"], "MPU6050_6Axis_MotionApps20.h": ["I2Cdev.h", "MPU6050.h"], "MPU6050_6Axis_MotionApps612.h": ["I2Cdev.h", "MPU6050.h"], "MPU6050.h": ["I2Cdev.h"], "Adafruit_MPU6050.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"], "Adafruit_GFX.h": ["Adafruit_I2CDevice.h"], "Adafruit_SSD1306.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "RTClib.h": ["Adafruit_I2CDevice.h"], "DallasTemperature.h": ["OneWire.h"], "MD_Parola.h": ["MD_MAX72xx.h"], "Adafruit_ILI9341.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h"], "Adafruit_BMP280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"], "Adafruit_BME280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h"]}
 ASYNC_IMPORTS = "ard.delay_us,ard.yield_,ard.http,ard.net_open,ard.net_dns"
 _lock = threading.RLock()
 
@@ -161,7 +195,13 @@ _MISSING = re.compile(r"fatal error: '([^']+)' file not found")
 def _find_lib(h, board, chosen, notes):
     """library that provides header h, or None (system / unsupported)"""
     if h in LIBS:
-        return libmgr.describe(LIBS[h])
+        p = LIBS[h].rstrip("/")
+        # 1.5-format library (sources in src/ and its subfolders, e.g. Adafruit_VL53L0X/src/core): describe the library root
+        return libmgr.describe(os.path.dirname(p) if os.path.basename(p) == "src" else p)
+    for root in sorted({v for v in LIBS.values()}):          # a header shipped inside a bundled library (RF24's printf.h)
+        if os.path.isfile(os.path.join(root, h)):
+            p = root.rstrip("/")
+            return libmgr.describe(os.path.dirname(p) if os.path.basename(p) == "src" else p)
     if _NO_INDEX.match(h):
         return None
     try:

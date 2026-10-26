@@ -107,8 +107,8 @@ function hintFor(msg) {
   if (/expected ';' after/.test(msg)) return 'Tambahkan titik koma (;) di akhir baris ini.';   // clang (ESP32) points at the right line
   if (/expected [‘'“]?;/.test(msg)) return 'Kemungkinan titik koma (;) kurang di akhir baris sebelumnya (kompilator menunjuk token berikutnya).';
   if (/No such file or directory|fatal error:|file not found/.test(msg)) return runtimeOf(boardOf()) === 'avr'
-    ? 'Library tidak tersedia. Uno/Nano: Servo, LiquidCrystal, LiquidCrystal_I2C, Adafruit_NeoPixel, Adafruit_SSD1306 + GFX, DHT, RTClib, Wire, SPI, EEPROM, SoftwareSerial.'
-    : 'Library tidak tersedia. ESP32/ESP8266: WiFi, HTTPClient, WiFiClientSecure, ArduinoJson, BluetoothSerial, Preferences, EEPROM, Wire, SPI, LiquidCrystal(_I2C), Adafruit_SSD1306 + GFX, Adafruit_NeoPixel, DHT, ESP32Servo, RTClib, esp_camera.';
+    ? 'Library tidak tersedia. Sudah terpasang untuk Uno/Nano/Mega: Servo, LiquidCrystal(_I2C), Adafruit NeoPixel/GFX/SSD1306/ILI9341/BMP280/BME280/MPU6050/ADS1X15/VL53L0X, FastLED, U8g2, DHT, RTClib, OneWire + DallasTemperature, HX711, TM1637, LedControl, MD_Parola, MFRC522, RF24, LoRa, TinyGPS++, IRremote, SD, Keypad, Stepper, AccelStepper, NewPing, RotaryEncoder, MPU6050 (I2Cdev), MPU6050_light, BH1750, ACS712, L298N, GravityTDS, DFRobot_PH, MQUnifiedsensor, MQ135, VL53L0X, TFMPlus, IBusBM, TinyGSM, SoftwareSerial, EEPROM. Periksa ejaan nama file .h.'
+    : 'Library tidak tersedia. ESP32/ESP8266/RP2040 punya WiFi, HTTPClient, WiFiClientSecure, ArduinoJson, BluetoothSerial, Preferences, EEPROM, Ticker, ESP32Servo, esp_camera, plus semua library Uno (FastLED, U8g2, DHTesp, Blynk, UniversalTelegramBot, PubSubClient, ThingSpeak, DFRobot_ESP_EC/PH, ...). Library lain diunduh otomatis dari Arduino Library Manager; periksa ejaan nama file .h.';
   if (/did you mean/.test(msg)) return 'Kemungkinan salah ketik: lihat saran nama yang benar di pesan ini.';
   if (/use of undeclared identifier/.test(msg)) return 'Periksa ejaan nama, atau deklarasikan variabel/fungsi sebelum dipakai.';
   if (/undefined reference to .(setup|loop)/.test(msg)) return 'Sketch harus punya fungsi void setup() dan void loop().';

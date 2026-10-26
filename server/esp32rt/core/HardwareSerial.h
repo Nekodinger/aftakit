@@ -3,7 +3,7 @@
 #include "host.h"
 #define SERIAL_8N1 0x800001c
 #define SERIAL_8E1 0x800001e
-class HardwareSerial : public arduino::Stream {
+class HardwareSerial : public Stream {
 public:
   explicit HardwareSerial(int port) : _port(port) {}
   void begin(unsigned long baud, uint32_t config = SERIAL_8N1, int8_t rx = -1, int8_t tx = -1, bool invert = false, unsigned long timeout = 20000UL);
@@ -15,7 +15,7 @@ public:
   void flush() override {}
   size_t write(uint8_t c) override;
   size_t write(const uint8_t *buf, size_t n) override;
-  using arduino::Print::write;
+  using Print::write;
   operator bool() const { return true; }
   void setDebugOutput(bool) {}
   void setRxBufferSize(size_t) {}

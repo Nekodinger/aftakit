@@ -13,7 +13,34 @@ static void tick() { if (++g_calls >= 400) { g_calls = 0; h_yield(); extern void
 // ---------------------------------------------------------------- interrupts (polled at safe points)
 struct Irq { voidFuncPtr fn; void (*fnArg)(void *); void *arg; };
 static Irq g_irq[64];
+// ---------------------------------------------------------------- software timers (Ticker, ESP32 hardware timer API)
+struct SimTimer { double period, next; void (*fn)(void *); void *arg; bool repeat, on; };
+static SimTimer g_tm[16];
+static bool g_in_timers = false;
+extern "C" int __sim_timer_add(double period_us, void (*fn)(void *), void *arg, bool repeat) {
+  for (int i = 0; i < 16; i++) if (!g_tm[i].on) { g_tm[i] = { period_us < 10 ? 10 : period_us, h_now_us() + (period_us < 10 ? 10 : period_us), fn, arg, repeat, true }; return i; }
+  return -1;
+}
+extern "C" void __sim_timer_cancel(int id) { if (id >= 0 && id < 16) g_tm[id].on = false; }
+extern "C" double __sim_timer_next() { double t = 1e300; for (auto &x : g_tm) if (x.on && x.next < t) t = x.next; return t; }
+static void run_timers() {
+  if (g_in_timers) return;
+  g_in_timers = true;
+  double now = h_now_us();
+  for (int i = 0; i < 16; i++) {
+    SimTimer &x = g_tm[i];
+    int guard = 0;
+    while (x.on && x.next <= now && guard++ < 64) {
+      x.next += x.period; if (!x.repeat) x.on = false;
+      x.fn(x.arg);
+    }
+    if (x.on && x.next <= now) x.next = now + x.period;          // far behind (long blocking call): skip ahead
+  }
+  g_in_timers = false;
+}
+
 void __sim_run_irqs() {
+  run_timers();
   int pairs[32];
   int n = h_irq_poll(pairs, 16);
   for (int i = 0; i < n; i++) {
@@ -97,7 +124,15 @@ extern "C" void noTone(uint8_t pin) { h_tone(pin, 0, 0); }
 // ---------------------------------------------------------------- time
 extern "C" unsigned long millis(void) { tick(); return (unsigned long)(h_now_us() / 1000.0); }
 extern "C" unsigned long micros(void) { tick(); return (unsigned long)h_now_us(); }
-extern "C" void delay(uint32_t ms) { h_delay_us(ms * 1000.0); __sim_run_irqs(); }
+extern "C" void delay(uint32_t ms) {
+  double end = h_now_us() + ms * 1000.0;
+  for (;;) {                                        // wake up for software timers due inside the delay
+    double now = h_now_us(), nx = __sim_timer_next();
+    if (nx >= end) { if (end > now) h_delay_us(end - now); __sim_run_irqs(); return; }
+    if (nx > now) h_delay_us(nx - now);
+    __sim_run_irqs();
+  }
+}
 extern "C" void delayMicroseconds(uint32_t us) { h_delay_us(us); }
 extern "C" void yield(void) { h_yield(); __sim_run_irqs(); }
 extern "C" uint32_t pulseIn(uint8_t pin, uint8_t state, uint32_t timeout) { return (uint32_t)h_pulse_in(pin, state, timeout ? timeout : 1000000); }

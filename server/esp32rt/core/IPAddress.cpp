@@ -20,7 +20,7 @@
 #include "IPAddress.h"
 #include "Print.h"
 
-using namespace arduino;
+
 
 IPAddress::IPAddress() : IPAddress(IPv4) {}
 
@@ -364,5 +364,5 @@ size_t IPAddress::printTo(Print& p) const
     return n;
 }
 
-const IPAddress arduino::IN6ADDR_ANY(IPv6);
-const IPAddress arduino::INADDR_NONE(0,0,0,0);
+const IPAddress IN6ADDR_ANY(IPv6);
+const IPAddress INADDR_NONE(0,0,0,0);

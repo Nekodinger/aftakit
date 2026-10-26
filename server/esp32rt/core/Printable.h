@@ -21,7 +21,7 @@
 
 #include <stdlib.h>
 
-namespace arduino {
+/* (global namespace; was namespace arduino) */
 
 class Print;
 
@@ -37,4 +37,4 @@ class Printable
     virtual size_t printTo(Print& p) const = 0;
 };
 
-}
+/* end */

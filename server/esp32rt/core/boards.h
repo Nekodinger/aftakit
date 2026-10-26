@@ -24,3 +24,7 @@ static const uint8_t SDA = 21, SCL = 22, SS = 5, MOSI = 23, MISO = 19, SCK = 18,
 static const uint8_t T0 = 4, T2 = 2, T3 = 15, T4 = 13, T5 = 12, T6 = 14, T7 = 27, T8 = 33, T9 = 32;
 static const uint8_t DAC1 = 25, DAC2 = 26;
 #endif
+
+#ifndef BUILTIN_LED
+#define BUILTIN_LED LED_BUILTIN
+#endif
