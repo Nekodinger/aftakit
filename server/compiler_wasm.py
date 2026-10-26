@@ -173,12 +173,30 @@ def _find_lib(h, board, chosen, notes):
     return lib
 
 
+_SIM_HEADERS = None
+
+
+def sim_headers():
+    """headers the simulator runtime provides itself (core, shims, ported libraries such as OneWire / SD)"""
+    global _SIM_HEADERS
+    if _SIM_HEADERS is None:
+        hs = {os.path.basename(f) for d in ("core", "shim") for f in glob.glob(os.path.join(RT, d, "*.h*"))}
+        hs |= {h for h, path in LIBS.items() if os.path.abspath(path).startswith(os.path.abspath(RT))}
+        _SIM_HEADERS = hs
+    return _SIM_HEADERS
+
+
 def resolve_libs(sketch_cpp, board, user_shas=()):
     """Like arduino-cli: preprocess the sketch; for every '#include' that is not found, add the library that
     provides it and try again. Returns (libraries, notes)."""
     chosen, notes, tried = [], [], set()
     for sha in user_shas:
-        chosen.append(libmgr.user_lib(sha))
+        lib = libmgr.user_lib(sha)
+        clash = sorted(h for h in lib.get("headers", []) if "/" not in h and h in sim_headers())
+        if clash:      # e.g. OneWire-master.zip: its ESP32 register code cannot run in WebAssembly; the bundled port is used
+            notes.append("Library %s dari zip tidak dipakai: simulator sudah menyediakan <%s> versi yang kompatibel." % (lib["name"], ">, <".join(clash)))
+            continue
+        chosen.append(lib)
     for _ in range(40):
         incs = list(INC) + ["-I" + d for l in chosen for d in l["inc"]]
         rc, so, se = _run([CXX, "-E", "-o", os.devnull] + CXXFLAGS + BOARDS[board] + incs + [sketch_cpp])
