@@ -62,7 +62,7 @@
                 <hr /><button data-act="rotate">Putar komponen <kbd>R</kbd></button>
                 <button data-act="duplicate">Duplikat <kbd>Ctrl D</kbd></button>
                 <button data-act="delete">Hapus <kbd>Del</kbd></button>
-                <hr /><button data-act="clear-wires">Hapus semua kabel</button>
+                <hr /><button data-act="wire-text">Sambung kabel dengan teks…</button><button data-act="tidy-wires">Rapikan semua kabel</button><hr /><button data-act="clear-wires">Hapus semua kabel</button>
               </div></div>
             <div class="menu" id="menuHelp"><button class="mb">Bantuan</button>
               <div class="menu-pop">
@@ -129,8 +129,9 @@
           <div id="viewport" tabindex="0" aria-label="Kanvas rangkaian">
             <div id="world"><svg id="wires" width="8000" height="8000"></svg><div id="parts"></div><div id="pinLayer"></div></div>
             <div id="emptyHint"><b>Kanvas kosong</b><span>Ketuk komponen di panel kiri untuk menambahkannya, atau buka <em>Contoh</em>.</span></div>
-            <div id="wireHint" hidden>Ketuk pin tujuan untuk menyelesaikan kabel · ketuk area kosong untuk batal</div>
+            <div id="wireHint" hidden><span>Ketuk pin tujuan · seret untuk geser layar · ketuk area kosong untuk menambah belokan</span><button type="button" id="wireUndoBend" title="Hapus belokan terakhir">↶</button><button type="button" id="wireCancel" title="Batalkan kabel (Esc)">✕ Batal</button></div>
           </div>
+          <div id="view3d" hidden></div>
           <div id="toolbar" role="toolbar" aria-label="Alat kanvas">
             <div class="tb-group run-group">
               <button id="btnRun" class="tb run" title="Jalankan (Ctrl+Enter)"><svg><use href="#i-play"/></svg><span>Jalankan</span></button>
@@ -151,6 +152,10 @@
               <span class="bb-mode-l">Breadboard</span>
               <button id="bbMove" class="tb" title="Geser: lubang breadboard bisa diseret untuk memindahkan breadboard (tidak membuat kabel)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/></svg><span>Geser</span></button>
               <button id="bbWire" class="tb on" title="Kabel: ketuk lubang breadboard untuk membuat kabel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="6" r="2.5"/><path d="M7 16.5C11 15 9 8 17 7.5"/></svg><span>Kabel</span></button>
+            </div>
+            <div class="tb-group v3-keep">
+              <button id="tb3d" class="tb" title="Tampilan 3D (simulasi tetap berjalan)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg><span>3D</span></button>
+              <button id="tbWireText" class="tb" title="Sambung kabel dengan mengetik (mis. esp32:D21 - oled1:SDA)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg><span>Ketik</span></button>
             </div>
             <div class="tb-group">
               <button id="tbGrid" class="tb on" title="Jepret ke grid"><svg><use href="#i-grid"/></svg></button>
@@ -269,6 +274,12 @@
     <label>URL kompilator <span class="muted small">(kosongkan = kompilator bawaan situs ini)</span><input id="setUrl" placeholder="kosong = bawaan (/api/cc)" /></label>
     <p class="muted small" id="setStatus"></p>
     <menu><button class="btn" value="cancel">Batal</button><button class="btn" id="setTest" type="button">Tes koneksi</button><button class="btn primary" id="setSave" value="ok">Simpan</button></menu></form></dialog>
+  <dialog id="dlgWires" class="wide"><form method="dialog"><h3>Sambung kabel dengan teks</h3>
+    <p class="muted small">Satu kabel per baris: <code>pinA - pinB [warna]</code>. Contoh: <code>esp32:D21 - oled1:SDA kuning</code>, <code>esp32:GND ke bb1:-</code>, <code>bb1:a10 - led1:A</code>, <code>D22 -&gt; SCL</code>. Pemisah: <code>-</code>, <code>-&gt;</code>, <code>ke</code>, <code>to</code>. Pin yang hanya ada di satu komponen boleh ditulis tanpa id. Breadboard: lubang <code>a1</code>…<code>j30</code>, rel <code>+</code> / <code>-</code> / <code>TP</code> / <code>TN</code> / <code>BP</code> / <code>BN</code> (dipilih lubang terdekat). Baris diawali <code>#</code> = komentar.</p>
+    <textarea id="wtText" rows="10" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="esp32:D21 - oled1:SDA kuning&#10;esp32:D22 - oled1:SCL hijau&#10;esp32:3V3 - oled1:VCC merah&#10;esp32:GND - oled1:GND hitam"></textarea>
+    <div id="wtParts" class="muted small"></div>
+    <div id="wtResult" class="wt-result"></div>
+    <menu><button type="button" class="btn" id="wtExport" title="Isi kotak dengan kabel yang sudah ada">Ambil dari rangkaian</button><button type="button" class="btn" id="wtCheck">Periksa</button><button class="btn" value="cancel">Tutup</button><button type="button" class="btn primary" id="wtApply">Sambungkan</button></menu></form></dialog>
   <dialog id="dlgHelp"><form method="dialog"><h3 id="helpTitle">Cara pakai</h3><div id="helpBody" class="help"></div><menu><button class="btn primary">Mengerti</button></menu></form></dialog>
   <input type="file" id="fileIn" hidden />
   <div id="dragGhost" hidden></div>

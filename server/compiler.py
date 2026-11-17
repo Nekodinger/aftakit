@@ -15,6 +15,12 @@ CORE_DIR = os.path.join(CORE, "cores", "arduino")
 
 # library header -> library source root (dirs added to include path)
 LIBS = {
+    "SevSeg.h": os.path.join(SRC, "SevSeg"),
+    "Encoder.h": os.path.join(SRC, "Encoder"),
+    "SimpleDHT.h": os.path.join(SRC, "SimpleDHT"),
+    "LiquidCrystal_PCF8574.h": os.path.join(SRC, "LiquidCrystal_PCF8574", "src"),
+    "Adafruit_MQTT.h": os.path.join(SRC, "Adafruit_MQTT_Library"),
+    "Adafruit_MQTT_Client.h": os.path.join(SRC, "Adafruit_MQTT_Library"),
     "FastLED.h": os.path.join(SRC, "FastLED", "src"),
     "U8g2lib.h": os.path.join(SRC, "U8g2_Arduino", "src"),
     "U8x8lib.h": os.path.join(SRC, "U8g2_Arduino", "src"),
@@ -102,7 +108,7 @@ DEPS = {
     "DallasTemperature.h": ["OneWire.h"],
     "Adafruit_BMP280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"],
     "Adafruit_BME280.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"],
-    "MAX30105.h": ["Wire.h"], "U8g2lib.h": ["SPI.h", "Wire.h"], "U8x8lib.h": ["SPI.h", "Wire.h"], "MPU6050.h": ["Wire.h"], "I2Cdev.h": ["Wire.h"], "MPU6050_6Axis_MotionApps20.h": ["Wire.h"], "MPU6050_6Axis_MotionApps612.h": ["Wire.h"], "GravityTDS.h": ["EEPROM.h"], "DFRobot_PH.h": ["EEPROM.h"], "Adafruit_ADS1X15.h": ["Adafruit_I2CDevice.h", "Wire.h", "SPI.h"], "BH1750.h": ["Wire.h"], "BlynkSimpleShieldEsp8266.h": ["SoftwareSerial.h"], "BlynkSimpleStream.h": [], "TinyGsmClient.h": ["SoftwareSerial.h"], "VL53L0X.h": ["Wire.h"], "Adafruit_VL53L0X.h": ["Wire.h"], "Adafruit_MPU6050.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"], "MPU6050_light.h": ["Wire.h"],
+    "MAX30105.h": ["Wire.h"], "U8g2lib.h": ["SPI.h", "Wire.h"], "U8x8lib.h": ["SPI.h", "Wire.h"], "MPU6050.h": ["Wire.h"], "I2Cdev.h": ["Wire.h"], "MPU6050_6Axis_MotionApps20.h": ["Wire.h"], "MPU6050_6Axis_MotionApps612.h": ["Wire.h"], "GravityTDS.h": ["EEPROM.h"], "DFRobot_PH.h": ["EEPROM.h"], "Adafruit_ADS1X15.h": ["Adafruit_I2CDevice.h", "Wire.h", "SPI.h"], "BH1750.h": ["Wire.h"], "LiquidCrystal_PCF8574.h": ["Wire.h"], "BlynkSimpleShieldEsp8266.h": ["SoftwareSerial.h"], "BlynkSimpleStream.h": [], "TinyGsmClient.h": ["SoftwareSerial.h"], "VL53L0X.h": ["Wire.h"], "Adafruit_VL53L0X.h": ["Wire.h"], "Adafruit_MPU6050.h": ["Adafruit_Sensor.h", "Adafruit_I2CDevice.h", "Wire.h", "SPI.h"], "MPU6050_light.h": ["Wire.h"],
     "MD_Parola.h": ["MD_MAX72xx.h", "SPI.h"], "Adafruit_ILI9341.h": ["Adafruit_GFX.h", "Adafruit_I2CDevice.h", "SPI.h", "Wire.h"], "MD_MAX72xx.h": ["SPI.h"], "SD.h": ["SPI.h"], "MFRC522.h": ["SPI.h"], "RF24.h": ["SPI.h"], "LoRa.h": ["SPI.h"],
 }
 

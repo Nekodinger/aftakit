@@ -121,4 +121,17 @@ void loop(){ delay(100); }`);
   const f = els.get('oled').frame, lit = f ? f.reduce((s, x) => s + x, 0) : 0;
   ok(/ok/.test(sim.serial) && lit === 32 * 16, `U8g2 drawBox 32x16 on SSD1306 -> ${lit} lit pixels`);
 }
+// libraries added for the catalogue parts compile for the ESP32 runtime
+for (const [name, src] of [
+  ['SimpleDHT', `#include <SimpleDHT.h>
+SimpleDHT22 dht(4); void setup(){ Serial.begin(115200); } void loop(){ float t, h; dht.read2(&t, &h, NULL); delay(2000); }`],
+  ['LiquidCrystal_PCF8574', `#include <Wire.h>
+#include <LiquidCrystal_PCF8574.h>
+LiquidCrystal_PCF8574 lcd(0x27); void setup(){ lcd.begin(16, 2); lcd.setBacklight(255); lcd.print("Halo"); } void loop(){}`],
+  ['Adafruit_MQTT', `#include <WiFi.h>
+#include "Adafruit_MQTT.h"
+#include "Adafruit_MQTT_Client.h"
+WiFiClient client; Adafruit_MQTT_Client mqtt(&client, "io.adafruit.com", 1883, "u", "k");
+Adafruit_MQTT_Publish pub(&mqtt, "u/feeds/t"); void setup(){ WiFi.begin("Wokwi-GUEST", ""); } void loop(){ if (mqtt.connected()) pub.publish(1); delay(1000); }`],
+]) { let built = true; try { compile(src); } catch (e) { built = false; console.log(String(e.message).slice(0, 500)); } ok(built, `${name} compiles for ESP32`); }
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS'); process.exit(fails ? 1 : 0);

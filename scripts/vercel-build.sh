@@ -37,11 +37,13 @@ for r in arduino/ArduinoCore-avr arduino-libraries/Servo arduino-libraries/Liqui
          olikraus/U8g2_Arduino arduino-libraries/Stepper waspinator/AccelStepper Chris--A/Keypad mathertel/RotaryEncoder beegee-tokyo/DHTesp \
          ElectronicCats/mpu6050 DFRobot/GravityTDS DFRobot/DFRobot_PH GreenPonik/DFRobot_ESP_PH_WITH_ADC_BY_GREENPONIK GreenPonik/DFRobot_ESP_EC_BY_GREENPONIK \
          AndreaLombardo/L298N vshymanskyy/TinyGSM RobTillaart/ACS712 blynkkk/blynk-library witnessmenow/Universal-Arduino-Telegram-Bot knolleary/pubsubclient \
-         mathworks/thingspeak-arduino adafruit/Adafruit_ADS1X15 claws/BH1750; do
+         mathworks/thingspeak-arduino adafruit/Adafruit_ADS1X15 claws/BH1750 \
+         DeanIsMe/SevSeg winlinvip/SimpleDHT mathertel/LiquidCrystal_PCF8574 adafruit/Adafruit_MQTT_Library; do
   [ -d "$(basename $r)" ] || git clone -q --depth 1 "https://github.com/$r.git"
 done
 # pinned / renamed: FastLED 3.6 (AVR; the WebAssembly build uses server/esp32rt/FastLED)
 [ -d FastLED ] || git clone -q --depth 1 --branch 3.6.0 https://github.com/FastLED/FastLED.git
+[ -d Encoder ] || git clone -q --depth 1 --branch 1.4.4 https://github.com/PaulStoffregen/Encoder.git   # master no longer builds for AVR
 bash ../esp32rt/fastled_sim/make.sh FastLED   # FastLED + simulator platform for the WebAssembly boards -> server/esp32rt/FastLED
 # keep only what is compiled: drop documents / pictures that some libraries ship (TFMini-Plus has 16 MB of PDFs)
 find . \( -iname '*.pdf' -o -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.bmp' -o -iname '*.zip' \) -delete 2>/dev/null || true

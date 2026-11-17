@@ -32,6 +32,12 @@ CXXFLAGS = ["-std=gnu++17", "-fno-threadsafe-statics"] + COMMON
 INC = ["-I" + os.path.join(RT, "core"), "-I" + os.path.join(RT, "shim"), "-I" + os.path.join(RT, "ArduinoJson", "src")]
 # real third-party libraries compiled for the simulator (header -> source dir)
 LIBS = {
+    "SevSeg.h": os.path.join(SRC, "SevSeg"),
+    "Encoder.h": os.path.join(SRC, "Encoder"),
+    "SimpleDHT.h": os.path.join(SRC, "SimpleDHT"),
+    "LiquidCrystal_PCF8574.h": os.path.join(SRC, "LiquidCrystal_PCF8574", "src"),
+    "Adafruit_MQTT.h": os.path.join(SRC, "Adafruit_MQTT_Library"),
+    "Adafruit_MQTT_Client.h": os.path.join(SRC, "Adafruit_MQTT_Library"),
     "FastLED.h": os.path.join(RT, "FastLED"),                # FastLED 3.6 with a simulator platform (platforms/sim)
     "U8g2lib.h": os.path.join(SRC, "U8g2_Arduino", "src"),
     "U8x8lib.h": os.path.join(SRC, "U8g2_Arduino", "src"),

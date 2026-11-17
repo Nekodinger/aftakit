@@ -16,6 +16,7 @@
     "@wokwi/elements": "1.9.2",
     "avr8js": "0.21.1",
     "jpeg-js": "0.4.4",
+    "three": "0.170.0",
     "ws": "8.18.3"
   },
   "devDependencies": {

@@ -29,6 +29,9 @@ export class CircuitCanvas {
     this.history = []; this.hpos = -1; this._restoring = false;
     this.pinTip = document.createElement('div'); this.pinTip.className = 'pin-tip'; this.pinTip.hidden = true; this.pinLayer.append(this.pinTip);
     this.ghost = document.createElementNS(SVGNS, 'path'); this.ghost.setAttribute('class', 'wire ghost'); this.ghost.style.display = 'none'; this.wiresSvg.append(this.ghost);
+    // bend-point handles of the selected wire live above the parts so they can always be grabbed
+    this.handlesSvg = document.createElementNS(SVGNS, 'svg'); this.handlesSvg.setAttribute('class', 'wire-handles'); this.handlesSvg.setAttribute('width', '8000'); this.handlesSvg.setAttribute('height', '8000');
+    this.world.append(this.handlesSvg);
     this._bind(); this._applyView();
   }
 
@@ -43,7 +46,7 @@ export class CircuitCanvas {
     return {
       version: 2,
       parts: [...this.parts.values()].map((p) => ({ id: p.id, type: p.type, left: Math.round(p.left * 10) / 10, top: Math.round(p.top * 10) / 10, rotate: p.rot * 90, attrs: { ...p.attrs } })),
-      connections: this.wires.map((w) => [w.a, w.b, w.plug ? 'plug' : w.color]),
+      connections: this.wires.map((w) => (w.pts?.length && !w.plug ? [w.a, w.b, w.color, w.pts.map((q) => [Math.round(q.x), Math.round(q.y)])] : [w.a, w.b, w.plug ? 'plug' : w.color])),
     };
   }
   elements() { return new Map([...this.parts].map(([id, p]) => [id, p.el])); }
@@ -59,7 +62,7 @@ export class CircuitCanvas {
         pending.push(this._create(p.type, p.left, p.top, p.attrs, p.id, ((p.rotate || 0) / 90) & 3));
       }
       await Promise.all(pending);
-      for (const [a, b, color] of model.connections || []) this._addWire(a, b, color === 'plug' ? null : color, true, color === 'plug');
+      for (const [a, b, color, pts] of model.connections || []) this._addWire(a, b, color === 'plug' ? null : color, true, color === 'plug', pts);
       for (const p of this.parts.values()) if (!isBB(p.type)) this._plug(p, false); // geometry decides breadboard contacts
       this._refreshAll(); this._hint(); this.emit('model');
       if (fit) this.fit();
@@ -167,6 +170,11 @@ export class CircuitCanvas {
     const el = part.el; let info = [];
     try { info = el.pinInfo || []; } catch { /* element not ready */ }
     part.pinInfo = info; part.size = [el.offsetWidth || part.size[0] || 0, el.offsetHeight || part.size[1] || 0];
+    if (!el.offsetWidth || !el.offsetHeight) {                     // inline hosts may report 0: take the artwork's own size
+      const sv = (el.shadowRoot || el).querySelector?.('svg'); let sw = 0, sh = 0;
+      try { sw = sv?.width.baseVal.value || 0; sh = sv?.height.baseVal.value || 0; } catch { /* no svg */ }
+      if (!part.size[0] && sw) part.size[0] = sw; if (!part.size[1] && sh) part.size[1] = sh;
+    }
     part.pins.textContent = '';
     for (const p of info) {
       const q = this._xf(part, p.x, p.y);
@@ -251,7 +259,7 @@ export class CircuitCanvas {
     return SIGNAL_COLORS[this.colorIdx++ % SIGNAL_COLORS.length];
   }
 
-  _addWire(a, b, color, silent, plug = false) {
+  _addWire(a, b, color, silent, plug = false, pts = null) {
     if (a === b || !this.pinPos(a) || !this.pinPos(b)) { if (!silent) this.emit('toast', { text: 'Pin tidak valid.', err: true }); return null; }
     const dup = this.wires.find((w) => (w.a === a && w.b === b) || (w.a === b && w.b === a));
     if (dup) return plug ? dup : null;
@@ -261,8 +269,8 @@ export class CircuitCanvas {
     const path = document.createElementNS(SVGNS, 'path'); path.setAttribute('class', 'wire');
     color = plug ? '#0000' : (color || this._autoColor(a, b)); path.style.stroke = color;
     g.append(hit, under, path);
-    const w = { id: this.nextWire++, a, b, color, g, hit, under, path, plug };
-    if (!plug) g.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.select({ kind: 'wire', id: w.id }); this.viewport.focus({ preventScroll: true }); });
+    const w = { id: this.nextWire++, a, b, color, g, hit, under, path, plug, pts: (pts || []).map((q) => (Array.isArray(q) ? { x: +q[0], y: +q[1] } : { x: +q.x, y: +q.y })).filter((q) => Number.isFinite(q.x) && Number.isFinite(q.y)) };
+    if (!plug) g.addEventListener('pointerdown', (e) => { if (this.pending) return; e.stopPropagation(); this.select({ kind: 'wire', id: w.id }); this.viewport.focus({ preventScroll: true }); });
     this.wiresSvg.insertBefore(g, this.ghost);
     this.wires.push(w); if (!plug) this._drawWire(w); this._markWired();
     return w;
@@ -285,12 +293,95 @@ export class CircuitCanvas {
     const dist = Math.hypot(pa.x - pb.x, pa.y - pb.y), off = Math.min(Math.max(dist * 0.4, 18), 140);
     return `M${pa.x},${pa.y} C${pa.x + da[0] * off},${pa.y + da[1] * off} ${pb.x + db[0] * off},${pb.y + db[1] * off} ${pb.x},${pb.y}`;
   }
+  /** polyline through bend points with small rounded corners */
+  _poly(points) {
+    const r = 6; let d = `M${points[0].x},${points[0].y}`;
+    for (let i = 1; i < points.length - 1; i++) {
+      const p = points[i - 1], c = points[i], n = points[i + 1];
+      const l1 = Math.hypot(c.x - p.x, c.y - p.y) || 1, l2 = Math.hypot(n.x - c.x, n.y - c.y) || 1, k1 = Math.min(r, l1 / 2) / l1, k2 = Math.min(r, l2 / 2) / l2;
+      d += ` L${c.x - (c.x - p.x) * k1},${c.y - (c.y - p.y) * k1} Q${c.x},${c.y} ${c.x + (n.x - c.x) * k2},${c.y + (n.y - c.y) * k2}`;
+    }
+    const e = points[points.length - 1]; return d + ` L${e.x},${e.y}`;
+  }
+  _wireD(pa, pb, pts) { return pts?.length ? this._poly([pa, ...pts, pb]) : this._curve(pa, pb); }
   _drawWire(w) {
     if (w.plug) return;
     const pa = this.pinPos(w.a), pb = this.pinPos(w.b); if (!pa || !pb) return;
-    const d = this._curve(pa, pb); w.hit.setAttribute('d', d); w.under.setAttribute('d', d); w.path.setAttribute('d', d);
+    const d = this._wireD(pa, pb, w.pts); w.hit.setAttribute('d', d); w.under.setAttribute('d', d); w.path.setAttribute('d', d);
+    if (this.selected?.kind === 'wire' && this.selected.id === w.id) this._drawHandles(w);
   }
   _redrawWires() { for (const w of this.wires) this._drawWire(w); }
+
+  // ---------------------------------------------------------------- wire bend points
+  /** handles of the selected wire: ● bend point (drag to move, double-tap to remove), + segment midpoint (drag to add a bend) */
+  _drawHandles(w) {
+    const g = this.handlesSvg; g.replaceChildren();
+    const pa = this.pinPos(w.a), pb = this.pinPos(w.b); if (!pa || !pb || w.plug) return;
+    const pts = [pa, ...w.pts, pb], z = this.zoom, rr = Math.max(5, 6 / z), hit = Math.max(12, 16 / z);
+    const mk = (x, y, kind, idx) => {
+      const c = document.createElementNS(SVGNS, 'g'); c.setAttribute('class', 'wh ' + kind); c.setAttribute('transform', `translate(${x},${y})`);
+      c.innerHTML = kind === 'pt' ? `<circle r="${hit}" class="wh-hit"/><circle r="${rr}" class="wh-dot"/>`
+        : `<circle r="${hit}" class="wh-hit"/><circle r="${rr * 0.85}" class="wh-mid"/><path d="M${-rr * 0.45},0H${rr * 0.45}M0,${-rr * 0.45}V${rr * 0.45}" class="wh-plus"/>`;
+      c.addEventListener('pointerdown', (e) => this._handleDown(e, w, kind, idx));
+      g.append(c);
+    };
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      if (Math.hypot(b.x - a.x, b.y - a.y) > 26 / Math.min(1, z)) mk((a.x + b.x) / 2, (a.y + b.y) / 2, 'mid', i);
+    }
+    w.pts.forEach((q, i) => mk(q.x, q.y, 'pt', i));
+  }
+  _handleDown(e, w, kind, idx) {
+    e.stopPropagation(); e.preventDefault();
+    const el = e.currentTarget; el.setPointerCapture(e.pointerId);
+    const now = performance.now();
+    if (kind === 'pt' && this._lastTap && this._lastTap.w === w.id && this._lastTap.i === idx && now - this._lastTap.t < 350) {   // double-tap: remove the bend
+      w.pts.splice(idx, 1); this._lastTap = null; this._drawWire(w); this._drawHandles(w); this.emit('change', { structural: false }); return;
+    }
+    this._lastTap = { w: w.id, i: idx, t: now };
+    let i = idx, inserted = false, moved = false; const sx = e.clientX, sy = e.clientY;
+    const move = (ev) => {
+      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+      moved = true;
+      const p = this.toWorld(ev.clientX, ev.clientY), q = { x: Math.round(p.x / this.snap) * this.snap, y: Math.round(p.y / this.snap) * this.snap };
+      if (kind === 'mid' && !inserted) { w.pts.splice(i, 0, q); inserted = true; } else w.pts[i] = q;
+      this._drawWire(w);
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up);
+      if (moved) { this._lastTap = null; this._drawHandles(w); this.emit('change', { structural: false }); }
+    };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  }
+  /** orthogonal route: leave each pin straight out, then horizontal / vertical runs (grid-aligned) */
+  _tidyPts(w) {
+    const pa = this.pinPos(w.a), pb = this.pinPos(w.b); if (!pa || !pb) return [];
+    const da = this._dir(pa), db = this._dir(pb), L = 15, s = this.snap, sn = (v) => Math.round(v / s) * s;
+    const p1 = { x: sn(pa.x + da[0] * L), y: sn(pa.y + da[1] * L) }, p2 = { x: sn(pb.x + db[0] * L), y: sn(pb.y + db[1] * L) };
+    const ha = da[0] !== 0, hb = db[0] !== 0, pts = [p1];
+    if (ha && hb) { const mx = sn((p1.x + p2.x) / 2); pts.push({ x: mx, y: p1.y }, { x: mx, y: p2.y }); }
+    else if (!ha && !hb) { const my = sn((p1.y + p2.y) / 2); pts.push({ x: p1.x, y: my }, { x: p2.x, y: my }); }
+    else if (ha) pts.push({ x: p2.x, y: p1.y });
+    else pts.push({ x: p1.x, y: p2.y });
+    pts.push(p2);
+    // drop duplicates and points on a straight line (incl. the pin ends)
+    const all = [pa, ...pts, pb], out = [];
+    for (let i = 1; i < all.length - 1; i++) {
+      const a = out.length ? out[out.length - 1] : all[0], c = all[i], n = all[i + 1];
+      if ((c.x === a.x && c.y === a.y) || (c.x === n.x && c.y === n.y)) continue;
+      if ((a.x === c.x && c.x === n.x) || (a.y === c.y && c.y === n.y)) continue;
+      out.push(c);
+    }
+    return out;
+  }
+  /** tidy one wire (id) or all wires: orthogonal routes */
+  tidyWires(id) {
+    const ws = this.wires.filter((w) => !w.plug && (id === undefined || w.id === id));
+    for (const w of ws) { w.pts = this._tidyPts(w); this._drawWire(w); }
+    if (ws.length) this.emit('change', { structural: false });
+    return ws.length;
+  }
+  clearBends(id) { const w = this.wires.find((x) => x.id === id); if (w && w.pts.length) { w.pts = []; this._drawWire(w); this.handlesSvg.replaceChildren(); this._drawHandles(w); this.emit('change', { structural: false }); } }
   _markWired() {
     const set = new Set(); for (const w of this.wires) { set.add(w.a); set.add(w.b); }
     for (const p of this.parts.values()) for (const d of p.pins.children) d.classList.toggle('wired', set.has(`${p.id}:${d.dataset.pin}`));
@@ -301,6 +392,8 @@ export class CircuitCanvas {
     this.selected = sel;
     for (const p of this.parts.values()) p.wrap.classList.toggle('sel', sel?.kind === 'part' && sel.id === p.id);
     for (const w of this.wires) w.g.classList.toggle('sel', sel?.kind === 'wire' && sel.id === w.id);
+    const sw = sel?.kind === 'wire' ? this.wires.find((x) => x.id === sel.id) : null;
+    if (sw) this._drawHandles(sw); else this.handlesSvg.replaceChildren();
     this.emit('select', sel);
   }
   deleteSelected() {
@@ -376,7 +469,7 @@ export class CircuitCanvas {
       const c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, r = vp.getBoundingClientRect();
       pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: this.zoom, wx: (c.x - r.left - this.pan.x) / this.zoom, wy: (c.y - r.top - this.pan.y) / this.zoom };
       if (drag) { drag.part.left = drag.l; drag.part.top = drag.t; for (const o of drag.others) { o.p.left = o.l; o.p.top = o.t; this._place(o.p); } this._place(drag.part); this._redrawWires(); }
-      drag = null; pan = null; if (this.pending?.dragging) this.cancelWire();
+      drag = null; pan = null; if (this.pending) this.pending.dragging = false;   // zooming keeps the wire being drawn
     };
 
     vp.addEventListener('pointerdown', (e) => {
@@ -385,7 +478,7 @@ export class CircuitCanvas {
       // the pin layer lies above every part, so breadboard holes hidden under a component's body would steal the
       // click; a component on top of the breadboard owns the area it covers
       const cover = this._componentUnder(e.clientX, e.clientY);
-      let pinEl = e.pointerType === 'touch' ? this._nearestPinEl(e.clientX, e.clientY, 16, !!cover) || e.target.closest?.('.pin') : e.target.closest?.('.pin');
+      let pinEl = e.pointerType === 'touch' ? this._nearestPinEl(e.clientX, e.clientY, 16, !!cover) || e.target.closest?.('.pin') : e.target.closest?.('.pin') || (this.pending ? this._nearestPinEl(e.clientX, e.clientY, 10, !!cover) : null);
       if (pinEl && cover && pinEl.dataset.pid !== cover.dataset.id && isBB(this.parts.get(pinEl.dataset.pid)?.type)) pinEl = null;
       const partEl = e.target.closest?.('.part') || (pinEl ? null : cover);
       // "Geser" mode: a hole of a breadboard grabs the breadboard itself (unless a wire is waiting for its end point)
@@ -396,9 +489,11 @@ export class CircuitCanvas {
         e.preventDefault(); return;
       }
       if (pinEl && e.button === 0 && !(this.interactive && !this.pending && partEl)) { e.preventDefault(); this._pinDown(pinEl); if (this.pending) { this.pending.sx = e.clientX; this.pending.sy = e.clientY; } this._showTip(pinEl); return; }
-      if (e.button === 1 || spaceDown || (!partEl && e.button === 0)) {
-        if (!partEl && e.button === 0 && !spaceDown) { this.cancelWire(); this.select(null); this.pinTip.hidden = true; }
-        pan = { sx: e.clientX, sy: e.clientY, px: this.pan.x, py: this.pan.y }; vp.setPointerCapture(e.pointerId); vp.classList.add('grabbing'); e.preventDefault(); return;
+      // while a wire waits for its end: dragging anywhere (empty space or a part body) pans the view, a tap adds a bend point
+      if (e.button === 1 || spaceDown || (!partEl && e.button === 0) || (this.pending && e.button === 0)) {
+        const tap = e.button === 0 && !spaceDown;
+        if (tap && !this.pending) { this.select(null); this.pinTip.hidden = true; }
+        pan = { sx: e.clientX, sy: e.clientY, px: this.pan.x, py: this.pan.y, tap, moved: false }; vp.setPointerCapture(e.pointerId); vp.classList.add('grabbing'); e.preventDefault(); return;
       }
       if (partEl && e.button === 0) {
         const part = this.parts.get(partEl.dataset.id); this.select({ kind: 'part', id: part.id }); vp.focus({ preventScroll: true });
@@ -420,7 +515,10 @@ export class CircuitCanvas {
         this.zoom = z; this.pan = { x: cx - pinch.wx * z, y: cy - pinch.wy * z }; this._applyView(); return;
       }
       this._pointerWorld = this.toWorld(e.clientX, e.clientY);
-      if (pan) { this.pan.x = pan.px + e.clientX - pan.sx; this.pan.y = pan.py + e.clientY - pan.sy; this._applyView(); return; }
+      if (pan) {
+        if (!pan.moved && Math.hypot(e.clientX - pan.sx, e.clientY - pan.sy) < (e.pointerType === 'touch' ? 8 : 4)) return;
+        pan.moved = true; this.pan.x = pan.px + e.clientX - pan.sx; this.pan.y = pan.py + e.clientY - pan.sy; this._applyView(); return;
+      }
       if (drag) {
         const dx = (e.clientX - drag.sx) / this.zoom, dy = (e.clientY - drag.sy) / this.zoom;
         if (!drag.moved && Math.hypot(dx, dy) < (e.pointerType === 'touch' ? 6 : 3)) return;
@@ -431,25 +529,29 @@ export class CircuitCanvas {
         this._place(drag.part); this._redrawWires();
         return;
       }
-      if (this.pending) this._drawGhost();
+      if (this.pending) { this._snapTarget(e); this._drawGhost(); if (this.pending.dragging) this._edgePan(e.clientX, e.clientY, e.pointerType); }
       if (e.pointerType === 'mouse') { const pinEl = e.target.closest?.('.pin'); if (pinEl) this._showTip(pinEl); else this.pinTip.hidden = true; }
     });
 
     const end = (e) => {
       if (e.pointerType === 'touch') { touches.delete(e.pointerId); if (pinch) { if (touches.size < 2) pinch = null; return; } }
-      if (pan) { pan = null; vp.classList.remove('grabbing'); }
+      if (pan) {
+        if (pan.tap && !pan.moved && e.type === 'pointerup') {
+          if (this.pending) { const w = this.toWorld(e.clientX, e.clientY), s = this.snap; (this.pending.pts ||= []).push({ x: Math.round(w.x / s) * s, y: Math.round(w.y / s) * s }); this._drawGhost(); }
+        }
+        pan = null; vp.classList.remove('grabbing');
+      }
+      this._edgePan(null);
       if (drag) {
         if (drag.moved) { this._plug(drag.part, !isBB(drag.part.type)); this._markWired(); this._redrawWires(); this.emit('change', { structural: false }); }
         drag = null;
       }
       if (this.pending?.dragging) {
-        const pinEl = (e.pointerType === 'touch' && this._nearestPinEl(e.clientX, e.clientY, 16)) || document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.pin');
+        this._snapTarget(e);
+        const pinEl = this._snapEl || (e.pointerType === 'touch' && this._nearestPinEl(e.clientX, e.clientY, 16)) || document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.pin');
         if (pinEl && !(pinEl.dataset.pid === this.pending.pid && pinEl.dataset.pin === this.pending.pin)) this._pinDown(pinEl);
-        else if (this.pending && !pinEl && isBB(this.parts.get(this.pending.pid)?.type) && Math.hypot(e.clientX - (this.pending.sx ?? e.clientX), e.clientY - (this.pending.sy ?? e.clientY)) > 40) {
-          // dragged from a breadboard hole into empty space: the user most likely wanted to move the board
-          this.cancelWire(); this.emit('toast', { text: 'Ingin memindahkan breadboard? Pilih mode "Geser" di toolbar (atau tekan B), lalu seret dari lubang mana pun.' });
-        }
-        else if (this.pending) this.pending.dragging = false;
+        // released over empty space: the wire stays open (tap the target pin, pan / zoom freely, tap empty space for bends)
+        else if (this.pending) { this.pending.dragging = false; this._snapEl?.classList.remove('snap'); this._snapEl = null; this._drawGhost(); }
       }
     };
     vp.addEventListener('pointerup', end); vp.addEventListener('pointercancel', end);
@@ -487,15 +589,37 @@ export class CircuitCanvas {
     return [...best[0].pins.children].find((d) => d.dataset.pin === best[1]) || null;
   }
 
+  /** auto-pan while a wire is dragged near the viewport edge (call with null to stop) */
+  _edgePan(cx, cy, pointerType) {
+    if (cx == null) { cancelAnimationFrame(this._edgeRaf); this._edgeRaf = 0; this._edgeAt = null; return; }
+    this._edgeAt = { cx, cy, pointerType };
+    if (this._edgeRaf) return;
+    const step = () => {
+      const at = this._edgeAt; if (!at || !this.pending?.dragging) { this._edgeRaf = 0; return; }
+      const r = this.viewport.getBoundingClientRect(), m = 40, sp = 12;
+      const dx = at.cx < r.left + m ? sp : at.cx > r.right - m ? -sp : 0, dy = at.cy < r.top + m ? sp : at.cy > r.bottom - m ? -sp : 0;
+      if (dx || dy) { this.pan.x += dx; this.pan.y += dy; this._applyView(); this._pointerWorld = this.toWorld(at.cx, at.cy);
+        this._snapTarget({ clientX: at.cx, clientY: at.cy, pointerType: at.pointerType, target: document.elementFromPoint(at.cx, at.cy) || this.viewport }); this._drawGhost(); }
+      this._edgeRaf = requestAnimationFrame(step);
+    };
+    this._edgeRaf = requestAnimationFrame(step);
+  }
+  /** while a wire is dragged: the pin within reach of the pointer becomes the target (highlighted, the ghost snaps to it) */
+  _snapTarget(e) {
+    const el = this.pending?.dragging ? ((e.pointerType === 'touch' ? null : e.target?.closest?.('.pin')) || this._nearestPinEl(e.clientX, e.clientY, e.pointerType === 'touch' ? 22 : 12, !!this._componentUnder(e.clientX, e.clientY))) : null;
+    const ok = el && !(el.dataset.pid === this.pending.pid && el.dataset.pin === this.pending.pin) ? el : null;
+    if (ok !== this._snapEl) { this._snapEl?.classList.remove('snap'); ok?.classList.add('snap'); this._snapEl = ok; if (ok) this._showTip(ok); }
+  }
+  undoBend() { if (this.pending?.pts?.length) { this.pending.pts.pop(); this._drawGhost(); } }
   _pinDown(pinEl) {
     const ref = `${pinEl.dataset.pid}:${pinEl.dataset.pin}`;
     if (!this.pending) {
-      this.pending = { pid: pinEl.dataset.pid, pin: pinEl.dataset.pin, ref, dragging: true };
+      this.pending = { pid: pinEl.dataset.pid, pin: pinEl.dataset.pin, ref, dragging: true, pts: [] };
       pinEl.classList.add('active'); this.wireHint.hidden = false; this._drawGhost(); return;
     }
-    const a = this.pending.ref; this.cancelWire();
+    const a = this.pending.ref, pts = this.pending.pts?.length ? this.pending.pts.map((q) => [q.x, q.y]) : null; this.cancelWire();
     if (a === ref) return;
-    const w = this._addWire(a, ref);
+    const w = this._addWire(a, ref, null, false, false, pts);
     if (w) { this.select({ kind: 'wire', id: w.id }); this.emit('change', { structural: true }); }
   }
   setBbMode(m) {
@@ -506,12 +630,13 @@ export class CircuitCanvas {
   }
   hasBreadboard() { for (const p of this.parts.values()) if (isBB(p.type)) return true; return false; }
   cancelWire() {
-    this.pending = null; this.ghost.style.display = 'none'; this.wireHint.hidden = true;
+    this.pending = null; this.ghost.style.display = 'none'; this.wireHint.hidden = true; this._snapEl?.classList.remove('snap'); this._snapEl = null;
     this.pinLayer.querySelectorAll('.pin.active').forEach((d) => d.classList.remove('active'));
   }
   _drawGhost() {
-    const pa = this.pinPos(this.pending.ref); if (!pa) return; const w = this._pointerWorld;
-    this.ghost.setAttribute('d', this._curve(pa, { x: w.x, y: w.y, part: null })); this.ghost.style.display = '';
+    const pa = this.pinPos(this.pending.ref); if (!pa) return;
+    const w = this._snapEl ? this.pinPos(`${this._snapEl.dataset.pid}:${this._snapEl.dataset.pin}`) || this._pointerWorld : this._pointerWorld;
+    this.ghost.setAttribute('d', this._wireD(pa, { x: w.x, y: w.y, part: null }, this.pending.pts)); this.ghost.style.display = '';
   }
   pinLabel(part, info) { return info.label && info.label !== (/^\d+\.\d+V$/.test(info.name) ? info.name : info.name.split('.')[0]) ? info.label : (isBB(part.type) ? info.description : info.name); }
   _showTip(pinEl) {

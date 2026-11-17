@@ -57,4 +57,14 @@ ok(builds(`#define TINY_GSM_MODEM_SIM800
 #include <TinyGsmClient.h>
 #include <SoftwareSerial.h>
 SoftwareSerial s(7, 8); TinyGsm modem(s); void setup(){ s.begin(9600); modem.restart(); } void loop(){}`), 'TinyGSM (SIM800) on Uno');
+// 5. libraries added for the catalogue parts: SevSeg (7-segment), Encoder, SimpleDHT, LiquidCrystal_PCF8574
+ok(builds(`#include <SevSeg.h>
+SevSeg sevseg; void setup(){ byte d[] = {2,3,4,5}; byte s[] = {6,7,8,9,10,11,12,13}; sevseg.begin(COMMON_CATHODE, 4, d, s); sevseg.setNumber(1234); } void loop(){ sevseg.refreshDisplay(); }`), 'SevSeg builds');
+ok(builds(`#include <Encoder.h>
+Encoder enc(2, 3); void setup(){ Serial.begin(9600); } void loop(){ Serial.println(enc.read()); delay(50); }`), 'Encoder builds');
+ok(builds(`#include <SimpleDHT.h>
+SimpleDHT22 dht(2); void setup(){ Serial.begin(9600); } void loop(){ float t, h; dht.read2(&t, &h, NULL); delay(2000); }`), 'SimpleDHT builds');
+ok(builds(`#include <Wire.h>
+#include <LiquidCrystal_PCF8574.h>
+LiquidCrystal_PCF8574 lcd(0x27); void setup(){ lcd.begin(16, 2); lcd.setBacklight(255); lcd.print("Halo"); } void loop(){}`), 'LiquidCrystal_PCF8574 builds');
 done();

@@ -1,3 +1,4 @@
+import { parseWiring, applyWiring, wiringToText } from './ui/wiretext.js';
 import '@wokwi/elements';
 import './style.css';
 import { registerParts } from './parts/index.js';
@@ -55,6 +56,10 @@ const canvas = new CircuitCanvas({
 const editor = new Editor({ ta: $('#code'), hl: $('#hl'), gutter: $('#gutter'), pos: $('#cursorPos'), onChange: () => setCompilerState(''), onRun: () => run() });
 editor.value = DEFAULT_CODE;
 canvas.on('toast', ({ text, err }) => toast(text, err));
+for (const [id, fn] of [['#wireCancel', () => canvas.cancelWire()], ['#wireUndoBend', () => canvas.undoBend()]]) {
+  const b = $(id); b.addEventListener('pointerdown', (e) => e.stopPropagation()); b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+}
+$('#wireHint').addEventListener('pointerdown', (e) => e.stopPropagation());
 canvas.on('model', () => updateBoardInfo());
 canvas.on('change', ({ structural }) => {
   if (structural && sim.running) stopSim('Rangkaian diubah — simulasi dihentikan.');
@@ -622,8 +627,9 @@ function renderProps(soft) {
   if (!sel) { host.innerHTML = '<div class="prop-empty">Ketuk komponen atau kabel di kanvas untuk melihat dan mengubah propertinya.</div>'; return; }
   if (sel.kind === 'wire') {
     const w = canvas.wires.find((x) => x.id === sel.id); if (!w) return;
-    host.innerHTML = `<div class="prop-h"><b>Kabel</b><code>${esc(w.a)} → ${esc(w.b)}</code></div><div class="swatches">${WIRE_COLORS.map((c) => `<button class="swatch${c === w.color ? ' on' : ''}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div><div class="prop-actions"><button class="btn danger" id="delWire"><svg><use href="#i-trash"/></svg><span>Hapus kabel</span></button></div>`;
+    host.innerHTML = `<div class="prop-h"><b>Kabel</b><code>${esc(w.a)} → ${esc(w.b)}</code></div><div class="swatches">${WIRE_COLORS.map((c) => `<button class="swatch${c === w.color ? ' on' : ''}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div><div class="prop-actions"><button class="btn" id="tidyWire" title="Jalur siku rapi dari pin ke pin">Rapikan kabel ini</button><button class="btn" id="bendClear"${w.pts?.length ? '' : ' disabled'}>Hapus belokan (${w.pts?.length || 0})</button><button class="btn" id="tidyAll">Rapikan semua kabel</button><button class="btn danger" id="delWire"><svg><use href="#i-trash"/></svg><span>Hapus kabel</span></button></div><div class="prop-hint">Seret titik ● untuk memindah belokan, seret tanda + di tengah segmen untuk menambah belokan, ketuk ganda ● untuk menghapusnya.</div>`;
     host.querySelectorAll('.swatch').forEach((b) => (b.onclick = () => { canvas.setWireColor(w.id, b.dataset.c); renderProps(); }));
+    $('#tidyWire').onclick = () => { canvas.tidyWires(w.id); renderProps(); }; $('#bendClear').onclick = () => { canvas.clearBends(w.id); renderProps(); }; $('#tidyAll').onclick = () => { canvas.tidyWires(); renderProps(); };
     $('#delWire').onclick = () => canvas.deleteSelected(); return;
   }
   const part = canvas.parts.get(sel.id); if (!part) return; const cat = BY_TAG[part.type];
@@ -720,6 +726,8 @@ async function doAction(act) {
     case 'rotate': canvas.rotateSelected(1); break;
     case 'duplicate': if (canvas.selected?.kind === 'part') canvas.duplicate(canvas.selected.id); break;
     case 'delete': canvas.deleteSelected(); break;
+    case 'wire-text': openWireText(); break;
+    case 'tidy-wires': toast(canvas.tidyWires() ? 'Semua kabel dirapikan (jalur siku).' : 'Belum ada kabel.'); break;
     case 'clear-wires': for (const w of [...canvas.wires]) if (!w.plug) canvas._removeWire(w, true); canvas.emit('change', { structural: true }); break;
     case 'help': openHelp(); break; case 'about': openAbout(); break;
   }
@@ -771,7 +779,8 @@ $('#setTest').onclick = async () => { $('#setStatus').textContent = 'Menguji…'
 function openHelp() {
   $('#helpTitle').textContent = 'Cara pakai';
   $('#helpBody').innerHTML = `<h4>Menambah komponen</h4><ul><li>Ketuk kartu komponen untuk menaruhnya di tengah kanvas.</li><li>Di iPad: tahan kartu sebentar lalu seret ke kanvas. Dengan mouse: langsung seret.</li><li>Letakkan komponen di atas breadboard: kakinya menempel otomatis ke lubang terdekat.</li></ul>
-  <h4>Membuat kabel</h4><ul><li>Ketuk pin pertama, lalu ketuk pin tujuan. Atau seret dari pin ke pin.</li><li>Ketuk kabel untuk memilih, lalu ganti warna atau hapus di panel Properti.</li></ul>
+  <h4>Membuat kabel</h4><ul><li>Ketuk pin pertama, lalu ketuk pin tujuan. Atau seret dari pin ke pin.</li><li>Selama kabel belum selesai: geser layar (satu jari / seret area kosong) dan cubit zoom tidak membatalkan kabel; ketuk area kosong untuk menambah belokan; seret kabel ke tepi layar untuk menggeser otomatis. Batal: tombol ✕ Batal, Esc, atau ketuk pin awal lagi.</li><li>Ketuk kabel untuk memilih: seret titik ● untuk memindah belokan, seret + untuk menambah belokan, ketuk ganda ● untuk menghapus. Panel Properti: ganti warna, <b>Rapikan kabel ini</b>, <b>Rapikan semua kabel</b>, hapus.</li><li><b>Ketik</b> (toolbar): sambung kabel dengan teks, satu baris per kabel, mis. <code>esp32:D21 - oled1:SDA kuning</code>, <code>esp32:GND ke bb1:-</code>, <code>bb1:a10 - led1:A</code>.</li></ul>
+  <h4>Tampilan 3D</h4><ul><li>Tombol <b>3D</b> di toolbar: rangkaian dalam 3D dan tetap tersimulasi (LED menyala, layar, NeoPixel, servo ikut bergerak).</li><li>Seret: putar · dua jari / klik kanan: geser · cubit / scroll: zoom · tombol Iso/Atas/Depan · keyboard WASD, Q/E, +/−.</li><li>Tekan tombol dan putar potensiometer langsung di model 3D; ketuk komponen untuk melihat pin dan sambungannya.</li></ul>
   <h4>Kanvas</h4><ul><li>Satu jari di area kosong: geser kanvas. Dua jari: cubit untuk zoom.</li><li>Seret komponen untuk memindah. Saat simulasi berjalan, seret lewat label nama di atasnya.</li><li>Tombol putar, duplikat, hapus, urungkan/ulangi ada di toolbar atas.</li></ul>
   <h4>Simulasi</h4><ul><li>Desain → Kode → Simulasi. Tekan <b>Jalankan</b>; galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Kode dijalankan untuk Arduino Uno/Nano, ESP32 DevKit, ESP32-CAM, NodeMCU / Wemos D1 mini (ESP8266) dan Raspberry Pi Pico.</li></ul>
   <h4>ESP32: WiFi, internet, Bluetooth, kamera</h4><ul><li><b>WiFi</b> tersimulasi: <code>WiFi.begin()</code> tersambung ±1 detik (nama/password bebas, mis. "Wokwi-GUEST"), IP 10.10.0.2.</li><li><b>Internet nyata</b>: <code>HTTPClient</code> (GET/POST, http/https) memakai koneksi iPad/laptop ini; layanan tanpa izin CORS otomatis lewat proxy simulator.</li><li><b>Blynk, Telegram, MQTT, ThingSpeak</b>: <code>WiFiClient</code> / <code>WiFiClientSecure</code> / <code>WiFiUDP</code> tersambung sungguhan lewat <b>gateway IoT</b> server kompilasi (seperti Wokwi), jadi library asli (BlynkSimpleEsp32, UniversalTelegramBot, PubSubClient…) dan API key asli langsung bisa dipakai.</li><li><b>Library</b>: <code>#include</code> library dari Arduino Library Manager diunduh otomatis. Library .zip (mis. Edge Impulse) ditambahkan di panel <b>Library</b>.</li><li><b>Bluetooth</b>: <code>BluetoothSerial</code> tersambung ke tab <b>Bluetooth</b> di konsol (seperti aplikasi Serial Bluetooth Terminal di HP).</li><li><b>ESP32-CAM</b>: <code>esp_camera_fb_get()</code> mengambil foto JPEG dari tab <b>Kamera</b>: kamera iPad/laptop, foto unggahan, atau gambar contoh.</li><li>Seperti ESP32 asli: ADC2 (GPIO 0, 2, 4, 12–15, 25–27) tidak bisa dibaca saat WiFi aktif — pakai GPIO 32–39. GPIO 34–39 hanya input. Logika 3,3 V.</li><li><b>Edge Impulse</b>: unggah ekspor "Arduino library" di panel Library; ESP32-CAM memakai gambar dari tab Kamera (<code>fmt2rgb888</code> didukung).</li><li>Belum didukung: WebServer / server di dalam ESP32 (gateway hanya koneksi keluar), Bluetooth BLE, FreeRTOS task. Waktu CPU diperkirakan, bukan akurat per siklus.</li></ul>`;
@@ -801,3 +810,45 @@ renderPalette(); renderProps(); updateBoardInfo(); updateBuildView();
   window.addEventListener('hashchange', () => { const id = location.hash.slice(4); if (location.hash.startsWith('#ex=') && id !== state.exampleId && EXAMPLES.some((e) => e.id === id)) loadExample(id); });
   window.__sim = { sim, canvas, editor, state, run, setMode, showPanel, runCheck };   // handle for automated tests
 })();
+
+// ---------------------------------------------------------------- wiring by typing
+function openWireText() {
+  const dlg = $('#dlgWires');
+  $('#wtResult').innerHTML = '';
+  const parts = [...canvas.parts.values()];
+  $('#wtParts').innerHTML = parts.length ? 'Komponen: ' + parts.map((p) => `<code title="${esc(BY_TAG[p.type]?.name || p.type)}">${esc(p.id)}</code>`).join(' ') : 'Kanvas masih kosong: tambahkan komponen dulu.';
+  $('#wtParts').querySelectorAll('code').forEach((c) => (c.onclick = () => { const t = $('#wtText'); const at = t.selectionStart ?? t.value.length; t.setRangeText(c.textContent + ':', at, at, 'end'); t.focus(); }));
+  dlg.showModal(); $('#wtText').focus();
+}
+function wtReport(res, applied) {
+  const lines = [];
+  if (applied != null) lines.push(`<div class="ok">✓ ${applied} kabel tersambung.</div>`);
+  else for (const w of res.wires) lines.push(`<div class="ok">✓ baris ${w.line}: ${esc(w.a)} → ${esc(w.b)}</div>`);
+  for (const e of res.errors) lines.push(`<div class="${e.dup ? 'warn' : 'err'}">${e.dup ? '•' : '✗'} baris ${e.line} <code>${esc(e.text)}</code>: ${esc(e.msg)}</div>`);
+  if (!lines.length) lines.push('<div class="muted">Tidak ada baris kabel.</div>');
+  $('#wtResult').innerHTML = lines.join('');
+}
+$('#tbWireText').onclick = () => openWireText();
+$('#wtCheck').onclick = () => wtReport(parseWiring(canvas, BY_TAG, $('#wtText').value));
+$('#wtExport').onclick = () => { $('#wtText').value = wiringToText(canvas); $('#wtResult').innerHTML = ''; };
+$('#wtApply').onclick = () => {
+  const res = parseWiring(canvas, BY_TAG, $('#wtText').value);
+  const n = applyWiring(canvas, res.wires);
+  wtReport(res, n);
+  if (n && !res.errors.some((e) => !e.dup)) { $('#dlgWires').close(); toast(`${n} kabel tersambung.`); }
+};
+
+// ---------------------------------------------------------------- 3D view (three.js, loaded on first use)
+let view3d = null;
+async function toggle3D(force) {
+  const btn = $('#tb3d');
+  if (!view3d) {
+    btn.disabled = true;
+    try { const { init3D } = await import('./ui/view3d.js'); view3d = init3D({ canvas, sim, host: $('#view3d'), catalog: BY_TAG }); view3d.onToggle = (on) => { btn.classList.toggle('on', on); document.body.classList.toggle('mode-3d', on); }; }
+    catch (e) { toast('Tampilan 3D gagal dimuat: ' + e.message, true); return; }
+    finally { btn.disabled = false; }
+  }
+  if (force === false) view3d.close(); else if (force === true) view3d.open(); else view3d.toggle();
+}
+$('#tb3d').onclick = () => toggle3D();
+window.__view3d = { toggle: toggle3D, get: () => view3d };   // handle for automated tests
