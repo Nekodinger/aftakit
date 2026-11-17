@@ -25,7 +25,7 @@ public:
   void persistent(bool) {}
   bool setTxPower(int) { return true; }
   IPAddress localIP(); IPAddress gatewayIP(); IPAddress subnetMask(); IPAddress dnsIP(uint8_t = 0);
-  String macAddress(); String SSID() { return _ssid; } int32_t RSSI();
+  String macAddress(); uint8_t *macAddress(uint8_t *mac); String softAPmacAddress() { return macAddress(); } String SSID() { return _ssid; } int32_t RSSI();
   String BSSIDstr() { return "24:A1:60:00:00:01"; }
   int32_t channel() { return 6; }
   bool config(IPAddress, IPAddress, IPAddress, IPAddress = IPAddress(), IPAddress = IPAddress()) { return true; }

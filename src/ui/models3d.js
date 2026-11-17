@@ -17,6 +17,8 @@ export const MM = 1 / 3.7795;
 export const BB_H = 8.5;
 const PCB = 1.6, SPACER = 2.5, PIN_UP = 6, PIN_DN = 3;
 import { C, S } from './partspec.js';
+import { CAR } from '../sim/car.js';
+const CAR_DECK = CAR.deck;
 export { SPEC } from './partspec.js';
 
 
@@ -46,7 +48,7 @@ function roundedRect(w, d, r) {
 export function buildPart3D(o) {
   const { part, W, D, tex } = o, spec = S[part.type] || {}, cat = o.catalog[part.type] || {};
   const root = new THREE.Group(), body = new THREE.Group(); root.add(body); root.userData.partId = part.id;
-  const contacts = new Map(), out = { root, contacts, kind: spec.special || 'generic', update: null, pick: null, texMats: [] };
+  const contacts = new Map(), out = { root, body, contacts, kind: spec.special || 'generic', update: null, pick: null, texMats: [] };
   const fx = (f) => (f - 0.5) * W, fz = (f) => (f - 0.5) * D;
   const pinLocal = (info) => ({ x: (info.x * MM) - W / 2, z: (info.y * MM) - D / 2 });
   const [pw, ph] = part.size;
@@ -303,6 +305,30 @@ export function buildPart3D(o) {
     const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 40), mat(0x2e6fc0, { r: 0.3 })); m.rotation.z = Math.PI / 2; m.position.set(0, r, 0); add(m);
     const nub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.4, r * 0.4, 1.4, 24), mat(C.silver, { metal: true, r: 0.25 })); nub.rotation.z = Math.PI / 2; nub.position.set(len / 2 + 0.7, r, 0); add(nub);
     const ring = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.002, r * 1.002, 2, 40, 1, true), mat(0xeeeeee)); ring.rotation.z = Math.PI / 2; ring.position.set(len / 2 - 3, r, 0); add(ring, false);
+  } else if (sp === 'car') {                                          // 2WD robot car: acrylic plate, TT motors, 65 mm wheels, caster
+    const deck = CAR_DECK, plateT = 3, px = [92 / 600, 508 / 600], pz = [14 / 700, 686 / 700];
+    const pw = (px[1] - px[0]) * W, pd = (pz[1] - pz[0]) * D, pcx = fx((px[0] + px[1]) / 2), pcz = fz((pz[0] + pz[1]) / 2);
+    const g = new THREE.ExtrudeGeometry(roundedRect(pw, pd, 11), { depth: plateT, bevelEnabled: false, curveSegments: 10 });
+    g.rotateX(-Math.PI / 2); g.translate(pcx, deck - plateT, pcz); topUV(g, 0, 0, W, D);
+    const acrylic = new THREE.MeshPhysicalMaterial({ color: 0x2b3442, roughness: 0.25, clearcoat: 0.6 });
+    add(new THREE.Mesh(g, [texMat(), acrylic]));
+    const wz = fz(470 / 700), R = 32.5, ww = 26, tire = mat(0x161616, { r: 0.85 }), hubM = mat(0xf2c94c, { r: 0.5 }), yellow = mat(0xf2c94c, { r: 0.55 });
+    out.wheels = [];
+    for (const [side, wxf] of [[-1, 42 / 600], [1, 558 / 600]]) {
+      const wheel = new THREE.Group(); wheel.position.set(fx(wxf), R, wz); body.add(wheel);
+      const t = new THREE.Mesh(new THREE.CylinderGeometry(R, R, ww, 40), tire); t.rotation.z = Math.PI / 2; t.castShadow = true; wheel.add(t);
+      for (let i = 0; i < 6; i++) {                                   // hub spokes make the turning visible
+        const sp6 = new THREE.Mesh(new THREE.BoxGeometry(1.5, R * 1.25, 5), hubM); sp6.position.x = side * (ww / 2 + 0.6); sp6.rotation.x = (i * Math.PI) / 3; wheel.add(sp6);
+      }
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 1.6, 24), hubM); cap.rotation.z = Math.PI / 2; cap.position.x = side * (ww / 2 + 0.9); wheel.add(cap);
+      out.wheels.push(wheel);
+      const mo = new THREE.Mesh(new THREE.BoxGeometry(0.25 * W, 18.5, 22), yellow); mo.position.set(fx(side < 0 ? 171 / 600 : 429 / 600), R, wz); add(mo);
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 18, 12), mat(0xffffff)); shaft.rotation.z = Math.PI / 2; shaft.position.set(fx(wxf) - side * 14, R, wz); add(shaft, false);
+      for (const dz of [-14, 14]) { const br = new THREE.Mesh(new THREE.BoxGeometry(3, deck - plateT - R + 10, 4), acrylic); br.position.set(fx(side < 0 ? 210 / 600 : 390 / 600), (deck - plateT + R - 10) / 2 + 5, wz + dz); add(br); }
+    }
+    const cz = fz(96 / 700), ball = new THREE.Mesh(new THREE.SphereGeometry(8, 24, 16), mat(0xc0c4ca, { metal: true, r: 0.25 })); ball.position.set(0, 8, cz); add(ball);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(7, 9, deck - plateT - 12, 24), mat(0x9aa0a8, { metal: true, r: 0.35 })); post.position.set(0, 12 + (deck - plateT - 12) / 2, cz); add(post);
+    out.kind = 'car';
   } else if (sp === 'frame') {                                        // quadcopter X frame with four motors (hubs show the live props)
     const cm = mat(0x1d1d1d, { r: 0.5 });
     const plate = new THREE.Mesh(new THREE.BoxGeometry(0.16 * W, 3, 0.16 * D), cm); plate.position.y = 6; add(plate);
@@ -339,7 +365,7 @@ export function buildPart3D(o) {
   for (const p of pins) {
     if (pinMode === 'female') { mk(p.name, p.x, T + 8.5, p.z); continue; }
     if (pinMode === 'pads' || (sp && pinMode !== 'auto' && pinMode !== 'legs')) {
-      let y = sp === 'servo' ? 1.3 : 0.5;
+      let y = sp === 'servo' ? 1.3 : sp === 'car' ? CAR_DECK + 0.4 : 0.5;
       if (!sp) for (const f of spec.f || []) if (f[0] === 'box' && p.fx >= f[1] - 0.02 && p.fx <= f[3] + 0.02 && p.fy >= f[2] - 0.02 && p.fy <= f[4] + 0.02) y = Math.max(y, T + (f[8] || 0) + f[5]);
       mk(p.name, p.x, y, p.z); continue;
     }

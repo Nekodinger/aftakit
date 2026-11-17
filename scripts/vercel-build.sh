@@ -32,7 +32,7 @@ for r in arduino/ArduinoCore-avr arduino-libraries/Servo arduino-libraries/Liqui
          adafruit/Adafruit-GFX-Library adafruit/Adafruit_SSD1306 adafruit/Adafruit_BusIO adafruit/DHT-sensor-library adafruit/Adafruit_Sensor adafruit/RTClib \
          PaulStoffregen/OneWire milesburton/Arduino-Temperature-Control-Library avishorp/TM1637 bogde/HX711 \
          adafruit/Adafruit_BMP280_Library adafruit/Adafruit_BME280_Library sparkfun/SparkFun_MAX3010x_Sensor_Library \
-         wayoda/LedControl MajicDesigns/MD_MAX72XX MajicDesigns/MD_Parola adafruit/Adafruit_ILI9341 arduino-libraries/SD miguelbalboa/rfid SpenceKonde/ATTinyCore nRF24/RF24 sandeepmistry/arduino-LoRa mikalhart/TinyGPSPlus Arduino-IRremote/Arduino-IRremote \
+         wayoda/LedControl MajicDesigns/MD_MAX72XX MajicDesigns/MD_Parola adafruit/Adafruit_ILI9341 arduino-libraries/SD miguelbalboa/rfid SpenceKonde/ATTinyCore nRF24/RF24 sandeepmistry/arduino-LoRa mikalhart/TinyGPSPlus \
          pololu/vl53l0x-arduino adafruit/Adafruit_VL53L0X budryerson/TFMini-Plus bmellink/IBusBM adafruit/Adafruit_MPU6050 rfetick/MPU6050_light GeorgK/MQ135 miguel5612/MQSensorsLib \
          olikraus/U8g2_Arduino arduino-libraries/Stepper waspinator/AccelStepper Chris--A/Keypad mathertel/RotaryEncoder beegee-tokyo/DHTesp \
          ElectronicCats/mpu6050 DFRobot/GravityTDS DFRobot/DFRobot_PH GreenPonik/DFRobot_ESP_PH_WITH_ADC_BY_GREENPONIK GreenPonik/DFRobot_ESP_EC_BY_GREENPONIK \
@@ -43,6 +43,7 @@ for r in arduino/ArduinoCore-avr arduino-libraries/Servo arduino-libraries/Liqui
 done
 # pinned / renamed: FastLED 3.6 (AVR; the WebAssembly build uses server/esp32rt/FastLED)
 [ -d FastLED ] || git clone -q --depth 1 --branch 3.6.0 https://github.com/FastLED/FastLED.git
+[ -d Arduino-IRremote ] || git clone -q --depth 1 --branch v4.7.1 https://github.com/Arduino-IRremote/Arduino-IRremote.git   # master dropped IrReceiver.begin(pin, ENABLE_LED_FEEDBACK)
 [ -d Encoder ] || git clone -q --depth 1 --branch 1.4.4 https://github.com/PaulStoffregen/Encoder.git   # master no longer builds for AVR
 bash ../esp32rt/fastled_sim/make.sh FastLED   # FastLED + simulator platform for the WebAssembly boards -> server/esp32rt/FastLED
 # keep only what is compiled: drop documents / pictures that some libraries ship (TFMini-Plus has 16 MB of PDFs)

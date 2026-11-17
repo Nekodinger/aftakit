@@ -18,6 +18,7 @@ const ID_BASE = {
 const SIGNAL_COLORS = ['#f5a524', '#2fbf71', '#3d8bfd', '#a855f7', '#06b6d4', '#f43f5e', '#84cc16', '#fb923c'];
 const baseName = (p) => (/^\d+\.\d+V$/.test(p) ? p : p.split('.')[0]);   // GND.2 -> GND, but 3.3V stays 3.3V (not pin 3)
 const isBB = (type) => !!BY_TAG[type]?.breadboard;
+const isUnder = (type) => !!BY_TAG[type]?.underlay;          // drawn below everything else (robot car chassis)
 const ROT = [[1, 0, 0, 1], [0, -1, 1, 0], [-1, 0, 0, -1], [0, 1, -1, 0]]; // cos,-sin,sin,cos for 0/90/180/270
 
 export class CircuitCanvas {
@@ -54,7 +55,7 @@ export class CircuitCanvas {
     };
   }
   elements() { return new Map([...this.parts].map(([id, p]) => [id, p.el])); }
-  simModel() { return { parts: [...this.parts.values()].map((p) => ({ id: p.id, type: p.type, left: p.left, top: p.top, attrs: p.attrs })), connections: this.wires.map((w) => [w.a, w.b]) }; }
+  simModel() { return { parts: [...this.parts.values()].map((p) => ({ id: p.id, type: p.type, left: p.left, top: p.top, rot: p.rot, size: p.size, attrs: p.attrs })), connections: this.wires.map((w) => [w.a, w.b]) }; }
 
   async setModel(model, { fit = true, keepHistory = false } = {}) {
     this._restoring = true;
@@ -134,7 +135,12 @@ export class CircuitCanvas {
     const part = { id, type, left: x ?? 0, top: y ?? 0, rot, attrs: { ...propDefaults(type), ...(attrs || {}) }, el, wrap, grip, pins, pinInfo: [], size: [0, 0] };
     this.parts.set(id, part);
     this.applyAttrs(part);
-    if (isBB(type)) { this.partsHost.prepend(wrap); this.pinLayer.prepend(pins); } else { this.partsHost.append(wrap); this.pinLayer.append(pins); }
+    // stacking: chassis (underlay) at the bottom, then breadboards, then components
+    if (isUnder(type)) { wrap.classList.add('under'); pins.classList.add('under'); this.partsHost.prepend(wrap); this.pinLayer.prepend(pins); }
+    else if (isBB(type)) {
+      const after = (host) => [...host.children].find((n) => !n.classList.contains('under')) || null;
+      this.partsHost.insertBefore(wrap, after(this.partsHost)); this.pinLayer.insertBefore(pins, after(this.pinLayer));
+    } else { this.partsHost.append(wrap); this.pinLayer.append(pins); }
     el.addEventListener('pininfo-change', () => this._refreshPins(part));
     if (type === 'wokwi-potentiometer' || type === 'wokwi-slide-potentiometer') {
       el.addEventListener('input', () => { const mn = el.min ?? 0, mx = el.max ?? 100; part.attrs.value = Math.round(((+el.value - mn) / (mx - mn)) * 100); this.emit('attrs', part.id); });
@@ -235,6 +241,7 @@ export class CircuitCanvas {
   }
   // Snap a part onto breadboard holes (if close) and create hidden "plug" connections.
   _plug(part, snap) {
+    if (isUnder(part.type)) snap = false;                    // a chassis never jumps onto breadboard holes
     if (isBB(part.type)) { for (const p of this.parts.values()) if (!isBB(p.type)) this._plug(p, false); return; }
     for (const w of this.wires.filter((w) => w.plug && (w.a.startsWith(part.id + ':') || w.b.startsWith(part.id + ':')))) this._removeWire(w, true);
     const holes = this._holes(part); if (!holes.length || !part.pinInfo.length) return;
@@ -255,6 +262,16 @@ export class CircuitCanvas {
     }
     for (const p of pins) { const h = nearest(p.x, p.y, 2); if (h) this._addWire(`${part.id}:${p.name}`, h.ref, null, true, true); }
     this._markWired(); this._redrawWires();
+  }
+  /** parts whose centre is on a chassis (they move with it in Desain and ride on it in 3D) */
+  _riders(car) {
+    const [w, h] = car.size, k = car.rot & 3, W = k & 1 ? h : w, H = k & 1 ? w : h, cx = car.left + w / 2, cy = car.top + h / 2, out = [];
+    for (const p of this.parts.values()) {
+      if (p === car || isUnder(p.type)) continue;
+      const qx = p.left + p.size[0] / 2, qy = p.top + p.size[1] / 2;
+      if (Math.abs(qx - cx) <= W / 2 - 8 && Math.abs(qy - cy) <= H / 2 - 8) out.push({ p, l: p.left, t: p.top });
+    }
+    return out;
   }
   pluggedInto(bbId) { return [...new Set(this.wires.filter((w) => w.plug && w.b.startsWith(bbId + ':')).map((w) => w.a.split(':')[0]))]; }
 
@@ -638,7 +655,7 @@ export class CircuitCanvas {
         const onGrip = e.target.classList?.contains('grip');
         if (!this.interactive || onGrip || isBB(part.type)) {
           // every part moves on its own: a breadboard does not drag its components along (contacts are re-made from geometry)
-          drag = { part, sx: e.clientX, sy: e.clientY, l: part.left, t: part.top, moved: false, others: [] }; vp.setPointerCapture(e.pointerId);
+          drag = { part, sx: e.clientX, sy: e.clientY, l: part.left, t: part.top, moved: false, others: isUnder(part.type) ? this._riders(part) : [] }; vp.setPointerCapture(e.pointerId);
           e.preventDefault();
         }
       }
@@ -681,7 +698,15 @@ export class CircuitCanvas {
       }
       this._edgePan(null);
       if (drag) {
-        if (drag.moved) { this._plug(drag.part, !isBB(drag.part.type)); this._rerouteBundles(drag.part.id); this._markWired(); this._redrawWires(); this.emit('change', { structural: false }); }
+        if (drag.moved && drag.others.length) {
+          // the chassis carried its parts: move the bends of wires between them and re-make breadboard contacts
+          const dx = drag.part.left - drag.l, dy = drag.part.top - drag.t, ids = new Set([drag.part.id, ...drag.others.map((o) => o.p.id)]);
+          const idOf = (ref) => ref.slice(0, ref.lastIndexOf(':'));
+          for (const w of this.wires) if (w.pts?.length && ids.has(idOf(w.a)) && ids.has(idOf(w.b))) w.pts = w.pts.map((q) => ({ x: q.x + dx, y: q.y + dy }));
+          for (const o of drag.others) if (!isBB(o.p.type)) this._plug(o.p, false);
+          for (const o of drag.others) this._rerouteBundles(o.p.id);
+        }
+        if (drag.moved) { this._plug(drag.part, !isBB(drag.part.type) && !isUnder(drag.part.type)); this._rerouteBundles(drag.part.id); this._markWired(); this._redrawWires(); this.emit('change', { structural: false }); }
         drag = null;
       }
       if (this.pending?.dragging) {
@@ -707,7 +732,7 @@ export class CircuitCanvas {
     for (const el of document.elementsFromPoint(cx, cy)) {
       const pe = el.closest?.('.part'); if (!pe) continue;
       const part = this.parts.get(pe.dataset.id);
-      if (part && !isBB(part.type)) return pe;
+      if (part && !isBB(part.type) && !isUnder(part.type)) return pe;
     }
     return null;
   }

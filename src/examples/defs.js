@@ -4,6 +4,30 @@ const U = (x = 0, y = 0) => P('uno', 'wokwi-arduino-uno', x, y);
 const R = (id, x, y, v = '220') => P(id, 'wokwi-resistor', x, y, { value: v });
 const W = (a, b) => [a, b];
 const G = 'uno:GND.1', V5 = 'uno:5V';
+const PR = (id, type, left, top, attrs, rot) => ({ ...P(id, type, left, top, attrs), rotate: rot * 90 });   // rot: quarter turns clockwise
+
+const CAR_PARTS = (arena) => [P('car', 'mod-car-chassis', 0, 0, { arena }), P('esp32', 'wokwi-esp32-devkit-v1', 118, 190), P('drv', 'mod-l298n', 345, 215), P('bat', 'mod-lipo', 205, 590, { cells: '2S', capacity: '1000' })];
+const CAR_WIRES = [W('bat:+', 'drv:12V'), W('bat:-', 'drv:GND'), W('drv:GND', 'esp32:GND.2'), W('drv:5V', 'esp32:VIN'),
+  W('drv:OUT1', 'car:ML+'), W('drv:OUT2', 'car:ML-'), W('drv:OUT3', 'car:MR+'), W('drv:OUT4', 'car:MR-'),
+  W('drv:ENA', 'esp32:D25'), W('drv:IN1', 'esp32:D26'), W('drv:IN2', 'esp32:D27'), W('drv:IN3', 'esp32:D14'), W('drv:IN4', 'esp32:D13'), W('drv:ENB', 'esp32:D33')];
+const CAR_MOTOR = `// L298N: motor kiri = OUT1/OUT2 (ENA, IN1, IN2), motor kanan = OUT3/OUT4 (ENB, IN3, IN4)
+const int ENA = 25, IN1 = 26, IN2 = 27;
+const int ENB = 33, IN3 = 14, IN4 = 13;
+
+// kiri, kanan: -255 (mundur penuh) ... 0 (berhenti) ... 255 (maju penuh)
+void motor(int kiri, int kanan) {
+  digitalWrite(IN1, kiri > 0);  digitalWrite(IN2, kiri < 0);
+  digitalWrite(IN3, kanan > 0); digitalWrite(IN4, kanan < 0);
+  analogWrite(ENA, constrain(abs(kiri), 0, 255));
+  analogWrite(ENB, constrain(abs(kanan), 0, 255));
+}
+
+void siapkanMotor() {
+  int pin[] = {ENA, IN1, IN2, ENB, IN3, IN4};
+  for (int p : pin) pinMode(p, OUTPUT);
+  motor(0, 0);
+}
+`;
 
 export const EXAMPLES = [
   { id: 'blink', group: 'Dasar', title: 'Blink LED', desc: 'LED eksternal + LED bawaan (pin 13) berkedip tiap 0,5 detik.',
@@ -1138,9 +1162,131 @@ void loop() {
       W('bat:+', 'esc3:BAT+'), W('bat:-', 'esc3:BAT-'), W('esc3:A', 'm3:A'), W('esc3:B', 'm3:B'), W('esc3:C', 'm3:C'), W('esc3:SIG', 'esp32:D14'), W('esc3:GND', 'esp32:GND.1'),
       W('bat:+', 'esc4:BAT+'), W('bat:-', 'esc4:BAT-'), W('esc4:A', 'm4:A'), W('esc4:B', 'm4:B'), W('esc4:C', 'm4:C'), W('esc4:SIG', 'esp32:D27'), W('esc4:GND', 'esp32:GND.1')] },
 
+
+  // ===================== Robot car + ESP-NOW (3D: tombol 3D, mobil berjalan di arena)
+  { id: 'car-espnow', group: 'Robot & ESP-NOW', board: 'esp32', noBB: true, title: 'Mobil RC ESP-NOW (ESP32 + L298N)', tags: ['ESP32', 'ESP-NOW', 'Robot', '3D'],
+    desc: 'ESP32 di mobil menerima perintah ESP-NOW dari remote virtual (tab ESP-NOW): F maju, B mundur, L kiri, R kanan, S berhenti. Buka 3D untuk melihat mobil berjalan di arena.',
+    code: `// Mobil RC ESP-NOW (penerima). Pengirimnya: tab "ESP-NOW" di konsol (remote virtual),
+// atau ESP32 kedua dengan esp_now_send() ke MAC mobil ini.
+// Perintah 1 huruf: F maju, B mundur, L belok kiri, R belok kanan, S berhenti.
+#include <WiFi.h>
+#include <esp_now.h>
+
+${CAR_MOTOR}
+int kecepatan = 220;                 // 0..255
+volatile char perintah = 'S';
+volatile unsigned long waktuPaket = 0;
+
+// dipanggil setiap ada paket ESP-NOW masuk (Arduino-ESP32 versi 3.x)
+void terima(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (len < 1) return;
+  perintah = (char)data[0];
+  waktuPaket = millis();
+}
+
+void setup() {
+  Serial.begin(115200);
+  siapkanMotor();
+  WiFi.mode(WIFI_STA);                       // ESP-NOW memakai radio WiFi mode station
+  Serial.print("MAC mobil: ");
+  Serial.println(WiFi.macAddress());         // tulis MAC ini di kode remote (pengirim)
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW gagal dimulai");
+    return;
+  }
+  esp_now_register_recv_cb(terima);
+  Serial.println("Siap. Buka tab ESP-NOW lalu tahan tombol arah.");
+}
+
+void loop() {
+  // failsafe: bila 0,5 detik tidak ada paket (remote dilepas / putus), mobil berhenti
+  if (millis() - waktuPaket > 500) perintah = 'S';
+
+  static char terakhir = 0;
+  if (perintah != terakhir) {
+    terakhir = perintah;
+    Serial.print("Perintah: ");
+    Serial.println(perintah);
+  }
+  switch (perintah) {
+    case 'F': motor(kecepatan, kecepatan); break;
+    case 'B': motor(-kecepatan, -kecepatan); break;
+    case 'L': motor(-kecepatan / 2, kecepatan / 2); break;
+    case 'R': motor(kecepatan / 2, -kecepatan / 2); break;
+    default:  motor(0, 0);
+  }
+  delay(20);
+}
+`,
+    parts: CAR_PARTS('Arena + rintangan'), wires: CAR_WIRES },
+
+  { id: 'car-avoid', group: 'Robot & ESP-NOW', board: 'esp32', noBB: true, title: 'Robot penghindar halangan (HC-SR04)', tags: ['ESP32', 'Robot', 'HC-SR04', '3D'],
+    desc: 'HC-SR04 di depan mobil mengukur jarak ke dinding / rintangan arena. Kurang dari 25 cm: mundur lalu belok. Buka 3D dan tekan "Ikuti mobil".',
+    code: `// Robot penghindar halangan: maju terus, bila ada halangan < 25 cm mundur sebentar lalu belok kanan.
+${CAR_MOTOR}
+const int TRIG = 5, ECHO = 18;      // ECHO HC-SR04 5 V: di mobil asli pakai pembagi tegangan 1k + 2k ke GPIO18
+
+long jarakCm() {
+  digitalWrite(TRIG, LOW);  delayMicroseconds(2);
+  digitalWrite(TRIG, HIGH); delayMicroseconds(10);
+  digitalWrite(TRIG, LOW);
+  long t = pulseIn(ECHO, HIGH, 30000);       // maksimal 30 ms (±5 m)
+  return t == 0 ? 999 : t / 58;
+}
+
+void setup() {
+  Serial.begin(115200);
+  siapkanMotor();
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+}
+
+void loop() {
+  long d = jarakCm();
+  Serial.print("Jarak: "); Serial.print(d); Serial.println(" cm");
+  if (d < 25) {
+    motor(0, 0);       delay(150);
+    motor(-200, -200); delay(350);           // mundur
+    motor(200, -200);  delay(320);           // belok kanan di tempat
+  } else {
+    motor(210, 210);                         // maju
+  }
+  delay(30);
+}
+`,
+    parts: [...CAR_PARTS('Arena + rintangan'), PR('sonar', 'wokwi-hc-sr04', 215, 22, {}, 2)],
+    wires: [...CAR_WIRES, W('sonar:VCC', 'drv:5V'), W('sonar:GND', 'esp32:GND.1'), W('sonar:TRIG', 'esp32:D5'), W('sonar:ECHO', 'esp32:D18')] },
+
+  { id: 'car-line', group: 'Robot & ESP-NOW', board: 'esp32', noBB: true, title: 'Robot pengikut garis (2× TCRT5000)', tags: ['ESP32', 'Robot', 'Line follower', '3D'],
+    desc: 'Dua sensor TCRT5000 di depan mobil membaca garis hitam lintasan oval. Sensor kiri kena garis: belok kiri; kanan kena: belok kanan.',
+    code: `// Robot pengikut garis: dua sensor TCRT5000 mengapit garis hitam.
+// DO TCRT5000 = HIGH di atas garis hitam (cahaya IR tidak memantul).
+${CAR_MOTOR}
+const int SENSOR_KIRI = 34, SENSOR_KANAN = 35;   // GPIO34/35: input saja, cocok untuk sensor
+const int LAJU = 170;
+
+void setup() {
+  Serial.begin(115200);
+  siapkanMotor();
+  pinMode(SENSOR_KIRI, INPUT);
+  pinMode(SENSOR_KANAN, INPUT);
+}
+
+void loop() {
+  bool kiri = digitalRead(SENSOR_KIRI), kanan = digitalRead(SENSOR_KANAN);
+  if (kiri && !kanan)      motor(-LAJU / 2, LAJU);    // garis di kiri: belok kiri
+  else if (kanan && !kiri) motor(LAJU, -LAJU / 2);    // garis di kanan: belok kanan
+  else                     motor(LAJU, LAJU);         // garis di tengah: lurus
+  static unsigned long t = 0;
+  if (millis() - t > 500) { t = millis(); Serial.printf("kiri=%d kanan=%d\\n", kiri, kanan); }
+  delay(5);
+}
+`,
+    parts: [...CAR_PARTS('Lintasan garis hitam'), P('lnL', 'mod-tcrt5000', 196, 70), P('lnR', 'mod-tcrt5000', 352, 70)],
+    wires: [...CAR_WIRES, W('lnL:VCC', 'esp32:3V3'), W('lnL:GND', 'esp32:GND.1'), W('lnL:DO', 'esp32:D34'), W('lnR:VCC', 'esp32:3V3'), W('lnR:GND', 'esp32:GND.1'), W('lnR:DO', 'esp32:D35')] },
 ];
 
-export const EXAMPLE_GROUPS = ['Dasar', 'Sensor & IoT', 'Tampilan', 'Aktuator & motor', 'Drone', 'Breadboard', 'ESP32 & IoT'];
+export const EXAMPLE_GROUPS = ['Dasar', 'Sensor & IoT', 'Tampilan', 'Aktuator & motor', 'Drone', 'Robot & ESP-NOW', 'Breadboard', 'ESP32 & IoT'];
 
 export function exampleModel(ex) {
   return { version: 1, parts: ex.parts, connections: ex.wires };

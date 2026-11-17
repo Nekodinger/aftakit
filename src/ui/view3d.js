@@ -12,6 +12,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { buildPart3D, SPEC, pcbEdgeColor } from './models3d.js';
 import * as L from './lab3d.js';
+import { makeScenery, hasScenery } from './scene3d.js';
+import { CAR, CAR_TYPE, mountedOn, arenaOf, trackPoints, DIST_SENSORS } from '../sim/car.js';
 
 const MM = 1 / 3.7795;                                  // px → mm
 const BB_H = 8.5, PCB = 1.6, HEADER = 2.5;
@@ -114,6 +116,9 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
       <button data-v="probe" title="Multimeter: ketuk pin untuk mengukur tegangan (M)">Ukur</button>
       <button data-v="diag" title="Cari kesalahan rangkaian (G)">Diagnosa<span class="v3-cnt" hidden></span></button>
       <button data-v="labels" class="on" title="Tampilkan label (L)">Label</button>
+      <span class="v3-sep v3-car" hidden></span>
+      <button data-v="follow" class="v3-car" hidden title="Kamera mengikuti mobil robot (K)">Ikuti mobil</button>
+      <button data-v="carreset" class="v3-car" hidden title="Kembalikan mobil ke posisi awal">Reset mobil</button>
       <button data-v="close" class="v3-close" title="Kembali ke 2D (Esc)">2D</button>
     </div>
     <div class="v3-help">Seret: putar · klik kanan / 2 jari: geser · scroll / pinch: zoom · tekan tombol, putar potensio, seret sensor naik-turun untuk mengubah nilainya, ketuk keypad / saklar langsung di model · <b>Ukur</b>: multimeter · <b>Diagnosa</b>: cari kesalahan</div>
@@ -128,8 +133,11 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
   const meterEl = host.querySelector('.v3-meter'), diagEl = host.querySelector('.v3-diag'), tipEl = host.querySelector('.v3-tip'), hudEl = host.querySelector('.v3-hud');
   let renderer = null, scene, camera, controls, root, raf = 0, open = false, showLabels = true;
   const items = new Map();                       // partId -> { part, group, top (mesh with texture), layers, dirty, last, kind, ... }
-  const wiresGroup = new THREE.Group(), labGroup = new THREE.Group();
-  let ground, grid, sun, bbox = new THREE.Box3(), rebuildT = 0, selected = null;
+  const wiresGroup = new THREE.Group(), labGroup = new THREE.Group(), sceneryRoot = new THREE.Group();
+  // robot cars: the chassis and every part on it ride in one group that the car's pose moves; the arena around it
+  const vehicles = [], sceneries = [], tethers = [];
+  let arenaGroup = null, follow = false, lastFrame = 0;
+  let ground, grid, sun, bbox = new THREE.Box3(), viewBox = new THREE.Box3(), rebuildT = 0, selected = null;
   // lab state: multimeter probes, fault list, simulator warnings
   let probeMode = false, diagOpen = false, issues = [], worst = new Map(), hoverMarker = null, anim = null, lastSlow = 0;
   const probes = [], runtimeLog = [];
@@ -149,7 +157,7 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
     scene.add(sun, sun.target);
     ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ color: 0xf1ece2, roughness: 1 }));
     ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
-    root = new THREE.Group(); scene.add(root, wiresGroup, labGroup);
+    root = new THREE.Group(); scene.add(root, wiresGroup, labGroup, sceneryRoot);
     hoverMarker = new THREE.Mesh(new THREE.SphereGeometry(1.15, 18, 12), new THREE.MeshBasicMaterial({ color: 0xffd400, transparent: true, opacity: 0.85, depthTest: false }));
     hoverMarker.renderOrder = 10; hoverMarker.visible = false; scene.add(hoverMarker);
     bindPointer();                                               // before the controls: our handler runs first
@@ -182,19 +190,39 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
 
   function build() {
     if (!renderer) return;
-    for (const it of items.values()) { it.obs?.disconnect(); disposeObj(it.group); root.remove(it.group); if (it.headerGroup) { disposeObj(it.headerGroup); root.remove(it.headerGroup); } }
+    for (const it of items.values()) { it.obs?.disconnect(); disposeObj(it.group); it.group.removeFromParent(); if (it.headerGroup) { disposeObj(it.headerGroup); it.headerGroup.removeFromParent(); } }
+    for (const sc of sceneries.splice(0)) { sc.dispose(); sceneryRoot.remove(sc.group); }
+    for (const v of vehicles.splice(0)) v.group.removeFromParent();
+    if (arenaGroup) { disposeObj(arenaGroup); scene.remove(arenaGroup); arenaGroup = null; }
+    tethers.length = 0;
     items.clear(); labelsEl.querySelectorAll('.v3-label').forEach((n) => n.remove());
     const pl = plugged(); bbox.makeEmpty();
+    // parts on a robot car chassis (by their 2D position)
+    const all = [...canvas.parts.values()], mountOf = new Map();
+    for (const c of all.filter((p) => p.type === CAR_TYPE)) for (const id of mountedOn(c, all)) if (!mountOf.has(id)) mountOf.set(id, c.id);
     for (const part of canvas.parts.values()) {
-      const it = makePart(part, pl); if (!it) continue;
+      const it = makePart(part, pl, mountOf.get(part.id)); if (!it) continue;
       items.set(part.id, it); root.add(it.group); if (it.headerGroup) root.add(it.headerGroup);
       const b = new THREE.Box3().setFromObject(it.group); if (!b.isEmpty()) bbox.union(b);
       if (!isBB(part.type)) { const l = document.createElement('div'); l.className = 'v3-label'; l.hidden = !showLabels; l.innerHTML = l._h = labelHTML(part); l.title = catalog[part.type]?.name || part.type; l.onclick = () => showInfo(part.id); labelsEl.append(l); it.label = l; }
     }
+    buildVehicles(all, mountOf);
     buildWires(pl);
+    attachWires();
+    for (const it of items.values()) {                          // scenery around sensors (obstacle, water, soil, lamp …)
+      if (!hasScenery(it.part.type)) continue;
+      const sc = makeScenery(it, { labelsHost: labelsEl, onCar: mountOf.has(it.part.id) });
+      if (sc) { sceneryRoot.add(sc.group); sceneries.push(sc); it.scenery = sc; }
+    }
     if (bbox.isEmpty()) bbox.set(new THREE.Vector3(-50, 0, -50), new THREE.Vector3(50, 10, 50));
+    // the camera also frames obstacles up to 1.5 m away, so the thing a sensor measures is in view
+    viewBox.copy(bbox);
+    for (const sc of sceneries) {
+      sc.group.matrix.copy(sc.it.group.matrixWorld); sc.group.updateMatrixWorld(true); sc.update(0);
+      for (const m of sc.pick) { const b = new THREE.Box3().setFromObject(m); if (!b.isEmpty() && b.distanceToPoint(bbox.getCenter(new THREE.Vector3())) < 1500) viewBox.union(b); }
+    }
     const c = bbox.getCenter(new THREE.Vector3()), sz = bbox.getSize(new THREE.Vector3()), R = Math.max(sz.x, sz.z, 60);
-    ground.scale.set(R * 8, R * 8, 1); ground.position.set(c.x, 0, c.z);
+    ground.scale.set(Math.max(R * 8, 9000), Math.max(R * 8, 9000), 1); ground.position.set(c.x, 0, c.z);
     if (grid) { scene.remove(grid); grid.geometry.dispose(); }
     const step = 10, n = Math.ceil((R * 3) / step) * 2;
     grid = new THREE.GridHelper(n * step, n, 0xd9d1c2, 0xd9d1c2); grid.position.set(Math.round(c.x / step) * step, 0.02, Math.round(c.z / step) * step); grid.material.transparent = true; grid.material.opacity = 0.55; scene.add(grid);
@@ -236,14 +264,16 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
     it.hasCanvas = !!r.querySelector('canvas');
   }
 
-  function makePart(part, pl) {
+  function makePart(part, pl, carId) {
     let [w, h] = part.size;
     if (!w || !h) { const r = hostRect(part), z = canvas.zoom || 1; w ||= ((part.rot & 1) ? r.height : r.width) / z; h ||= ((part.rot & 1) ? r.width : r.height) / z; }
     if (!w || !h) { w ||= 20; h ||= 20; }
-    const W = w * MM, D = h * MM, plug = pl.has(part.id);
+    const W = w * MM, D = h * MM, deck = carId ? CAR.deck : 0;
+    // a distance sensor on a robot car stands on its pins (on a bracket), facing the way it is drawn
+    const plug = pl.has(part.id) || (!!carId && !!DIST_SENSORS[part.type] && part.type !== 'mod-tfluna');
     if (isBB(part.type)) {
-      const group = new THREE.Group(), it = { part, group, kind: 'bb' }; group.userData.partId = part.id;
-      group.position.set((part.left + w / 2) * MM, 0, (part.top + h / 2) * MM); group.rotation.y = -(part.rot & 3) * Math.PI / 2;
+      const group = new THREE.Group(), it = { part, group, kind: 'bb', carId }; group.userData.partId = part.id;
+      group.position.set((part.left + w / 2) * MM, deck, (part.top + h / 2) * MM); group.rotation.y = -(part.rot & 3) * Math.PI / 2;
       const body = new THREE.Mesh(new THREE.BoxGeometry(W, BB_H, D), new THREE.MeshStandardMaterial({ color: 0xf3f0e9, roughness: 0.9 }));
       body.position.y = BB_H / 2; body.castShadow = true; body.receiveShadow = true; group.add(body);
       texturedTop(part, it, W, D, BB_H, { noBody: true });
@@ -254,9 +284,9 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const m = buildPart3D({ part, W, D, tex, plugged: plug, catalog, glowTex: glowTex() });
     const group = m.root;
-    group.position.set((part.left + w / 2) * MM, (plug ? BB_H : 0) + m.lift, (part.top + h / 2) * MM); group.rotation.y = -(part.rot & 3) * Math.PI / 2;
+    group.position.set((part.left + w / 2) * MM, (pl.has(part.id) ? BB_H : 0) + m.lift + deck, (part.top + h / 2) * MM); group.rotation.y = -(part.rot & 3) * Math.PI / 2;
     group.updateMatrixWorld(true);
-    const it = { part, group, kind: m.kind, model: m, contacts: m.contacts, tex, cv, standing: m.standing };
+    const it = { part, group, kind: m.kind, model: m, contacts: m.contacts, tex, cv, standing: m.standing, carId };
     it.refresh = async () => {
       const snap = await snapshot(part, canvas.zoom || 1, [w, h]); if (!snap || items.get(part.id) !== it) return;
       const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height); g.drawImage(snap, 0, 0, cv.width, cv.height); tex.needsUpdate = true;
@@ -286,10 +316,15 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
   function contactOf(ref) {
     const pid = ref.slice(0, ref.lastIndexOf(':')), pin = ref.slice(ref.lastIndexOf(':') + 1), it = items.get(pid), q = canvas.pinPos(ref);
     if (!q) return null;
-    if (it?.kind === 'bb') return toV(q, BB_H);
+    if (it?.kind === 'bb') return onCar(it, toV(q, BB_H + (it.carId ? CAR.deck : 0)));
     const c = it?.contacts?.get(pin);
-    if (c) { const v3 = c.getWorldPosition(new THREE.Vector3()); if (it.standing) { v3.x = q.x * MM; v3.z = q.y * MM; } return v3; }
-    return toV(q, 2);
+    if (c) { const v3 = c.getWorldPosition(new THREE.Vector3()); return it.standing ? onCar(it, new THREE.Vector3(q.x * MM, v3.y, q.y * MM)) : v3; }
+    return onCar(it, toV(q, 2 + (it?.carId ? CAR.deck : 0)));
+  }
+  /** a point given in Desain coordinates (car at its start pose) → where it is now that the car has moved */
+  function onCar(it, v) {
+    const veh = it?.vehicle; if (!veh) return v;
+    return veh.group.localToWorld(v.clone().sub(veh.O));
   }
   function roundedPath(P, r) {
     const path = new THREE.CurvePath();
@@ -324,15 +359,108 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
       tube.castShadow = true; tube.userData.wire = w.id; wiresGroup.add(tube);
       if (w.bundle) tube.userData.bundle = w.bundle;
       for (const P of [A, B]) {                                        // Dupont housing on each end
-        const tip = new THREE.Mesh(new THREE.BoxGeometry(2.5, 7, 2.5), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6 })); tip.position.copy(P).setY(P.y + 3.6); tip.castShadow = true; wiresGroup.add(tip);
+        const tip = new THREE.Mesh(new THREE.BoxGeometry(2.5, 7, 2.5), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6 })); tip.position.copy(P).setY(P.y + 3.6); tip.castShadow = true; tip.userData.wireOf = w.id; wiresGroup.add(tip);
       }
     }
     for (const t of canvas.bundleTies?.() || []) {                   // cable ties around each harness
       const y = bundleHop.get(t.bundle); if (y == null) continue;
       const tie = new THREE.Mesh(new THREE.BoxGeometry(t.w * MM + 0.8, 1.9, t.h * MM + 0.8), new THREE.MeshStandardMaterial({ color: 0x1b1b1d, roughness: 0.5 }));
-      tie.position.set((t.x + t.w / 2) * MM, y, (t.y + t.h / 2) * MM); tie.castShadow = true; wiresGroup.add(tie);
-      const head = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 2.2), tie.material); head.position.copy(tie.position); head.position[t.vertical ? 'x' : 'z'] += (t.vertical ? t.w : t.h) * MM / 2 + 1.1; wiresGroup.add(head);
+      tie.position.set((t.x + t.w / 2) * MM, y, (t.y + t.h / 2) * MM); tie.castShadow = true; tie.userData.bundle = t.bundle; wiresGroup.add(tie);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 2.2), tie.material); head.position.copy(tie.position); head.position[t.vertical ? 'x' : 'z'] += (t.vertical ? t.w : t.h) * MM / 2 + 1.1; head.userData.bundle = t.bundle; wiresGroup.add(head);
     }
+  }
+
+  // ---------------------------------------------------------------- robot car: vehicle group, arena, driving
+  const carBehavior = (id) => sim.behaviors?.find((b) => b._part?.id === id)?.car || null;
+  function buildVehicles(all, mountOf) {
+    for (const car of all.filter((p) => p.type === CAR_TYPE)) {
+      const cit = items.get(car.id); if (!cit) continue;
+      const O = new THREE.Vector3(cit.group.position.x, 0, cit.group.position.z), k = car.rot & 3;
+      const group = new THREE.Group(); group.position.copy(O); group.userData.vehicle = car.id; root.add(group); group.updateMatrixWorld(true);
+      const veh = { id: car.id, group, O, k, members: new Set([car.id]), wheelAng: 0, last: null, arena: arenaOf(car.attrs?.arena) };
+      for (const [id, c] of mountOf) if (c === car.id) veh.members.add(id);
+      for (const id of veh.members) { const it = items.get(id); if (!it) continue; group.attach(it.group); it.vehicle = veh; }
+      vehicles.push(veh);
+      if (!arenaGroup) buildArena(veh);
+    }
+    for (const b of host.querySelectorAll('.v3-car')) b.hidden = !vehicles.length;
+    if (!vehicles.length && follow) { follow = false; host.querySelector('[data-v=follow]')?.classList.remove('on'); }
+  }
+  /** wires between parts that ride on the same car move with it; wires from the car to the table follow it (tethers) */
+  function attachWires() {
+    if (!vehicles.length) return;
+    const owner = (ref) => { const id = ref.slice(0, ref.lastIndexOf(':')); return vehicles.find((v) => v.members.has(id)) || null; };
+    const byWire = new Map(canvas.wires.map((w) => [w.id, w]));
+    const bundleCar = new Map();
+    for (const obj of [...wiresGroup.children]) {
+      const wid = obj.userData.wire ?? obj.userData.wireOf, w = wid != null ? byWire.get(wid) : null;
+      if (w) {
+        const a = owner(w.a), b = owner(w.b);
+        if (a && a === b) { a.group.attach(obj); if (w.bundle) bundleCar.set(w.bundle, a); }
+        else if ((a || b) && obj.userData.wire) tethers.push({ w, mesh: obj });
+        else if (a || b) {                                            // the plug on the car's end of a tether rides along
+          const A = contactOf(w.a), B = contactOf(w.b), nearA = A && B ? obj.position.distanceTo(A) < obj.position.distanceTo(B) : !!a;
+          const v = nearA ? a : b; if (v) v.group.attach(obj);
+        }
+      }
+    }
+    for (const obj of [...wiresGroup.children]) if (obj.userData.bundle && bundleCar.has(obj.userData.bundle) && !obj.userData.wire) bundleCar.get(obj.userData.bundle).group.attach(obj);
+  }
+  function buildArena(veh) {
+    const ar = veh.arena, g = new THREE.Group(), s = 1000;          // arena metres → mm
+    g.position.copy(veh.O).sub(new THREE.Vector3(ar.start.x * s, 0, ar.start.z * s).applyAxisAngle(new THREE.Vector3(0, 1, 0), -veh.k * Math.PI / 2));
+    g.rotation.y = -veh.k * Math.PI / 2;
+    if (ar.walls) {
+      const L = ar.walls.half * s, h = ar.walls.h * s, t = 18, m = new THREE.MeshStandardMaterial({ color: 0xe8e0d0, roughness: 0.85 });
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(2 * L, 2 * L), new THREE.MeshStandardMaterial({ color: 0xd9cdb6, roughness: 0.95 }));
+      floor.rotation.x = -Math.PI / 2; floor.position.y = 0.05; floor.receiveShadow = true; g.add(floor);
+      for (const [x, z, w, d] of [[0, -L - t / 2, 2 * L + 2 * t, t], [0, L + t / 2, 2 * L + 2 * t, t], [-L - t / 2, 0, t, 2 * L], [L + t / 2, 0, t, 2 * L]]) {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); wall.position.set(x, h / 2, z); wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
+      }
+    }
+    for (const b of ar.boxes) {
+      const box = new THREE.Mesh(new THREE.BoxGeometry(b.w * s, b.h * s, b.d * s), new THREE.MeshStandardMaterial({ color: b.c, roughness: 0.6 }));
+      box.position.set(b.x * s, b.h * s / 2, b.z * s); box.castShadow = true; box.receiveShadow = true; g.add(box);
+    }
+    if (ar.track) {                                                  // black tape line, 25 mm wide
+      const pts = trackPoints(ar.track, 160), half = 12.5;
+      const geo = new THREE.BufferGeometry(), pos = [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1], dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1, nx = -dz / l * half, nz = dx / l * half;
+        const A = [a.x * s, a.z * s], B = [b.x * s, b.z * s];
+        pos.push(A[0] + nx, 0.3, A[1] + nz, A[0] - nx, 0.3, A[1] - nz, B[0] + nx, 0.3, B[1] + nz, A[0] - nx, 0.3, A[1] - nz, B[0] - nx, 0.3, B[1] - nz, B[0] + nx, 0.3, B[1] + nz);
+      }
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.computeVertexNormals();
+      const tape = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9, side: THREE.DoubleSide })); tape.receiveShadow = true; g.add(tape);
+    }
+    arenaGroup = g; scene.add(g);
+  }
+  /** move every car to its simulated pose */
+  function updateVehicles(now) {
+    const dt = lastFrame ? Math.min(0.1, (now - lastFrame) / 1000) : 0; lastFrame = now;
+    let moved = false;
+    for (const v of vehicles) {
+      const b = carBehavior(v.id), p = b?.pose, st = b?.arena?.().start || v.arena.start;
+      const x = p ? p.x - st.x : 0, z = p ? p.z - st.z : 0, th = p ? p.th - st.th : 0;
+      const off = new THREE.Vector3(x * 1000, 0, z * 1000).applyAxisAngle(new THREE.Vector3(0, 1, 0), -v.k * Math.PI / 2);
+      const prev = v.group.position.clone();
+      v.group.position.copy(v.O).add(off); v.group.rotation.y = -th;
+      if (!v.last || v.last.distanceToSquared(v.group.position) > 1e-4 || Math.abs((v.lastTh ?? 0) - th) > 1e-4) { moved = true; v.last = v.group.position.clone(); v.lastTh = th; }
+      if (follow && v === vehicles[0]) { const d = v.group.position.clone().sub(prev); controls.target.add(d); camera.position.add(d); }
+      const wheels = items.get(v.id)?.model?.wheels;
+      if (wheels && p && sim.running) { wheels[0].rotation.x -= (p.vl * dt) / CAR.wheelR; wheels[1].rotation.x -= (p.vr * dt) / CAR.wheelR; }
+      v.group.updateMatrixWorld(true);
+    }
+    if (moved) {
+      for (const p of probes) placeProbe(p);
+      if (now - (api._tetherT || 0) > 90) { api._tetherT = now; for (const t of tethers) rebuildTether(t); }
+    }
+  }
+  function rebuildTether(t) {
+    const A = contactOf(t.w.a), B = contactOf(t.w.b); if (!A || !B) return;
+    const hop = Math.max(A.y, B.y) + 12, P = [A.clone().setY(A.y + 7), A.clone().setY(hop), B.clone().setY(hop), B.clone().setY(B.y + 7)];
+    const curve = roundedPath(P.filter((q, i) => i === 0 || q.distanceTo(P[i - 1]) > 0.05), 4);
+    t.mesh.geometry.dispose(); t.mesh.geometry = new THREE.TubeGeometry(curve, 48, 0.55, 8, false);
   }
 
   // ---------------------------------------------------------------- live state
@@ -361,10 +489,15 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
       if (!p.pos) continue; const s = project(p.pos.clone().setY(p.pos.y + 6));
       p.el.style.display = s.vis ? '' : 'none'; if (s.vis) p.el.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
     }
+    for (const sc of sceneries) for (const a of sc.anchors) {
+      const s = project(a.pos.clone().applyMatrix4(sc.group.matrixWorld));
+      a.el.style.display = s.vis && showLabels ? '' : 'none'; if (s.vis) a.el.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
+    }
     if (!showLabels) return;
     for (const it of items.values()) {
       if (!it.label) continue;
-      if (!it.anchor) { const b = new THREE.Box3().setFromObject(it.group); if (b.isEmpty()) continue; it.anchor = b.getCenter(new THREE.Vector3()); it.anchor.y = b.max.y + 3; }
+      if (!it.anchor) { const b = new THREE.Box3().setFromObject(it.group); if (b.isEmpty()) continue; it.anchor = b.getCenter(new THREE.Vector3()); it.anchor.y = b.max.y + 3; if (it.vehicle) it.anchorLocal = it.vehicle.group.worldToLocal(it.anchor.clone()); }
+      if (it.vehicle && it.anchorLocal) it.anchor.copy(it.anchorLocal).applyMatrix4(it.vehicle.group.matrixWorld);
       const s = project(it.anchor);
       it.label.style.display = s.vis ? '' : 'none';
       if (s.vis) it.label.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
@@ -385,6 +518,9 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
     button: 'Tekan dan tahan tutup tombol di model untuk menekan.', pot: 'Seret kenop ke kiri / kanan untuk memutar.', joystick: 'Seret tuas ke segala arah; ketuk untuk menekan (SEL).',
     encoder: 'Seret ke kiri / kanan untuk memutar per klik; ketuk untuk menekan tombolnya.', slide: 'Ketuk saklar untuk memindah posisinya.',
     sensor: 'Seret sensor ke atas / bawah untuk mengubah nilai utamanya (dan ke kiri / kanan untuk nilai kedua), atau pakai panel Kontrol.',
+    distance: 'Seret benda (dinding) di depan sensor maju / mundur untuk mengubah jaraknya, atau pakai panel Kontrol.',
+    car: 'Mobil bergerak saat simulasi berjalan, sesuai tegangan motor kiri (ML) dan kanan (MR). Komponen yang diletakkan di atas sasis ikut terbawa; sensor jarak / garis / halangan di atasnya membaca arena.',
+    oncar: 'Komponen ini terpasang di mobil robot: nilainya dihitung dari arena (dinding, rintangan, garis) saat mobil bergerak.',
     toggle: 'Ketuk sensor untuk memicu / melepas (mis. ada gerakan, ada halangan).', proxy: 'Ketuk tombol / tuts di model seperti pada komponen asli.',
   };
   function interactKind(it) {
@@ -392,6 +528,9 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
     if (it.kind === 'button') return 'button'; if (it.kind === 'pot' || it.kind === 'slidepot') return 'pot';
     if (it.kind === 'joystick') return 'joystick'; if (it.kind === 'encoder') return 'encoder';
     if (it.part.type === 'wokwi-slide-switch') return 'slide';
+    if (it.kind === 'car') return 'car';
+    if (it.vehicle && (DIST_SENSORS[it.part.type] || ['mod-ir-obstacle', 'mod-tcrt5000'].includes(it.part.type))) return 'oncar';
+    if (it.scenery?.axis) return 'distance';
     if (L.dragProps(cat).length) return 'sensor'; if (L.toggleProp(cat)) return 'toggle';
     return 'proxy';
   }
@@ -495,7 +634,7 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
 
   // ---------------------------------------------------------------- multimeter
   function pinWorld(part, info) {
-    if (isBB(part.type)) { const q = canvas._xf(part, info.x, info.y); return new THREE.Vector3((part.left + q.x) * MM, BB_H, (part.top + q.y) * MM); }
+    if (isBB(part.type)) { const q = canvas._xf(part, info.x, info.y), it = items.get(part.id); return onCar(it, new THREE.Vector3((part.left + q.x) * MM, BB_H + (it?.carId ? CAR.deck : 0), (part.top + q.y) * MM)); }
     return contactOf(`${part.id}:${info.name}`);
   }
   /** nearest pin to a ray hit (part body, breadboard hole or the end of a wire) */
@@ -634,18 +773,37 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
       return null;
     };
     api._hit = hit;
+    /** an obstacle of a distance sensor under the pointer (it can be dragged along the sensor's beam) */
+    const hitScenery = (e) => {
+      const picks = sceneries.flatMap((sc) => sc.pick.map((m) => ({ m, sc }))); if (!picks.length) return null;
+      const r = glCanvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      const hs = ray.intersectObjects(picks.map((p) => p.m), true); if (!hs.length) return null;
+      let o = hs[0].object; while (o && !picks.some((p) => p.m === o)) o = o.parent;
+      return picks.find((p) => p.m === o) || null;
+    };
+    /** distance along the sensor's axis that is closest to the pointer ray (in the scenery's own frame, mm) */
+    const axisParam = (e, sc) => {
+      const r = glCanvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      const inv = sc.group.matrixWorld.clone().invert(), ro = ray.ray.origin.clone().applyMatrix4(inv), rd = ray.ray.direction.clone().transformDirection(inv);
+      const { origin: o, dir: d } = sc.axis, w0 = o.clone().sub(ro), b = d.dot(rd), dd = d.dot(w0), ee = rd.dot(w0), den = 1 - b * b;
+      return den < 1e-6 ? null : (b * ee - dd) / den;
+    };
     const cap = (e) => { try { glCanvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ } };
     glCanvas.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       down = { x: e.clientX, y: e.clientY, t: performance.now() };
       if (probeMode) return;                                          // multimeter: taps only, the view still orbits
+      const sh = hitScenery(e);
+      if (sh?.sc.axis) { controls.enabled = false; act = { kind: 'obst', it: sh.sc.it, sc: sh.sc, x: e.clientX, y: e.clientY, moved: false }; cap(e); return; }
       const h = hit(e); if (!h) return;
       const it = items.get(h.id); if (!it) return; const el = it.part.el, ik = interactKind(it);
       if (ik === 'button') { controls.enabled = false; act = { kind: 'button', it }; el.pressed = true; el.dispatchEvent(new Event('button-press')); sim.resolveNow?.(); cap(e); }
       else if (ik === 'pot') { controls.enabled = false; act = { kind: 'pot', it, x: e.clientX, v0: +el.value || 0 }; cap(e); }
       else if (ik === 'joystick') { controls.enabled = false; act = { kind: 'joy', it, x: e.clientX, y: e.clientY }; cap(e); }
       else if (ik === 'encoder') { controls.enabled = false; act = { kind: 'enc', it, x: e.clientX, acc: 0 }; cap(e); }
-      else if (ik === 'sensor') {
+      else if (ik === 'sensor' || ik === 'distance') {
         const ps = L.dragProps(catalog[it.part.type]);
         controls.enabled = false; act = { kind: 'sensor', it, ps, x: e.clientX, y: e.clientY, v0: ps.map((p) => +(it.part.attrs[p.key] ?? p.def)) }; cap(e);
       }
@@ -675,6 +833,12 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
           el.dispatchEvent(new InputEvent(cw ? 'rotate-cw' : 'rotate-ccw'));
           flash(act.it.part.id, cw ? '↻ putar kanan' : '↺ putar kiri', hx, hy);
         }
+      } else if (act.kind === 'obst' && act.moved) {
+        const t = axisParam(e, act.sc); if (t === null) return;
+        const p = catalog[act.it.part.type]?.props?.find((x) => x.key === 'distance'); if (!p) return;
+        const v = snapStep(act.sc.axis.unit === 'cm' ? t / 10 : t, p);
+        if (v !== +act.it.part.attrs.distance) setAttr(act.it.part, 'distance', v, false);
+        flash(act.it.part.id, `${act.it.part.id}: jarak ${L.fmtProp(p, act.it.part.attrs.distance)}`, hx, hy);
       } else if (act.kind === 'sensor' && act.moved) {
         const txt = [];
         act.ps.forEach((p, i) => {
@@ -696,6 +860,7 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
       }
       if (a?.kind === 'enc' && !a.moved) { const el = a.it.part.el; el.dispatchEvent(new Event('button-press')); sim.resolveNow?.(); setTimeout(() => { el.dispatchEvent(new Event('button-release')); sim.resolveNow?.(); }, 180); flash(a.it.part.id, 'tombol encoder ditekan'); }
       if (a?.kind === 'sensor' && a.moved) { try { onAttr?.(a.it.part, a.ps[0].key, true); } catch { /* hook */ } }
+      if (a?.kind === 'obst' && a.moved) { try { onAttr?.(a.it.part, 'distance', true); } catch { /* hook */ } }
       if (a?.kind === 'pot' && a.moved !== false) { try { onAttr?.(a.it.part, 'value', true); } catch { /* hook */ } }
       const tap = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6 && performance.now() - down.t < 600;
       if (tap) {
@@ -720,7 +885,7 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
 
   // ---------------------------------------------------------------- camera tools
   function view(kind) {
-    const c = bbox.getCenter(new THREE.Vector3()), sz = bbox.getSize(new THREE.Vector3());
+    const vb = viewBox.isEmpty() ? bbox : viewBox, c = vb.getCenter(new THREE.Vector3()), sz = vb.getSize(new THREE.Vector3());
     const R = Math.max(sz.x, sz.z * 1.2, 40), d = (R / 2) / Math.tan((camera.fov * Math.PI) / 360) * 1.25 / Math.min(1, camera.aspect) ;
     const dir = kind === 'top' ? new THREE.Vector3(0, 1, 0.0001) : kind === 'front' ? new THREE.Vector3(0, 0.42, 1) : new THREE.Vector3(-0.62, 0.95, 0.85);
     controls.target.copy(c); camera.position.copy(c).add(dir.normalize().multiplyScalar(d)); camera.updateProjectionMatrix(); controls.update();
@@ -745,11 +910,16 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
     else if (t === 'labels') { showLabels = !showLabels; btn?.classList.toggle('on', showLabels); for (const it of items.values()) if (it.label) it.label.hidden = !showLabels; }
     else if (t === 'probe') { setProbeMode(!probeMode); if (probeMode) toast?.(sim.running ? 'Multimeter aktif: ketuk pin untuk mengukur.' : 'Multimeter aktif. Jalankan simulasi (▶) agar tegangan terukur.'); }
     else if (t === 'diag') setDiag(!diagOpen);
+    else if (t === 'follow') { follow = !follow; host.querySelector('[data-v=follow]')?.classList.toggle('on', follow); if (follow && vehicles[0]) focusPart(vehicles[0].id); toast?.(follow ? 'Kamera mengikuti mobil.' : 'Kamera tidak lagi mengikuti mobil.'); }
+    else if (t === 'carreset') {
+      let n = 0; for (const v of vehicles) { const b = carBehavior(v.id); if (b) { b.reset(); n++; } }
+      sim.resolveNow?.(); toast?.(n ? 'Mobil kembali ke posisi awal.' : 'Jalankan simulasi dulu: posisi mobil dihitung saat program berjalan.');
+    }
     else if (t === 'close') api.close();
   }
   function onKey(e) {
     if (!open || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable || e.ctrlKey || e.metaKey || e.altKey) return;
-    const k = e.key.toLowerCase(), map = { q: () => orbit(-15), e: () => orbit(15), w: () => panBy(0, 1), s: () => panBy(0, -1), a: () => panBy(-1, 0), d: () => panBy(1, 0), '+': () => dolly(0.85), '=': () => dolly(0.85), '-': () => dolly(1.18), r: () => view('iso'), t: () => view('top'), f: () => view('front'), l: () => tool('labels', host.querySelector('[data-v=labels]')), m: () => tool('probe'), g: () => tool('diag'), escape: () => (probeMode ? setProbeMode(false) : api.close()) };
+    const k = e.key.toLowerCase(), map = { q: () => orbit(-15), e: () => orbit(15), w: () => panBy(0, 1), s: () => panBy(0, -1), a: () => panBy(-1, 0), d: () => panBy(1, 0), '+': () => dolly(0.85), '=': () => dolly(0.85), '-': () => dolly(1.18), r: () => view('iso'), t: () => view('top'), f: () => view('front'), l: () => tool('labels', host.querySelector('[data-v=labels]')), m: () => tool('probe'), g: () => tool('diag'), k: () => vehicles.length && tool('follow'), escape: () => (probeMode ? setProbeMode(false) : api.close()) };
     if (map[k]) { e.preventDefault(); map[k](); }
     if (!e.ctrlKey && !e.metaKey) e.stopImmediatePropagation();          // 2D shortcuts (R, Del, B …) stay inactive while the 3D view is open
   }
@@ -761,6 +931,8 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
       const t = Math.min(1, (now - anim.t0) / 450), k = t * t * (3 - 2 * t);
       controls.target.lerpVectors(anim.ft, anim.tt, k); camera.position.lerpVectors(anim.fp, anim.tp, k); if (t >= 1) anim = null;
     }
+    if (vehicles.length) updateVehicles(now);
+    for (const sc of sceneries) { sc.group.matrix.copy(sc.it.group.matrixWorld); sc.group.matrixWorldNeedsUpdate = true; sc.update(now); }
     liveUpdate(now); controls.update(); renderer.render(scene, camera); placeLabels();
     for (const h of halos) h.material.opacity = 0.45 + 0.55 * Math.abs(Math.sin(now / 380));
     if (now - lastSlow > 280) {                                       // live readings (multimeter, card, labels)
@@ -785,6 +957,7 @@ export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
     open() {
       if (!renderer) setup();
       open = true; host.hidden = false; resize(); build(); view('iso');
+      if (vehicles.length) { follow = true; host.querySelector('[data-v=follow]')?.classList.add('on'); focusPart(vehicles[0].id); }   // a robot car: the camera rides along
       const help = host.querySelector('.v3-help'); help.classList.remove('fade'); clearTimeout(api._helpT); api._helpT = setTimeout(() => help.classList.add('fade'), 12000);
       cancelAnimationFrame(raf); loop();
       api.onToggle?.(true);

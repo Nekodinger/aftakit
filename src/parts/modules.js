@@ -146,6 +146,32 @@ const POS = ['otomatis', 'Depan-Kanan (CCW)', 'Belakang-Kanan (CW)', 'Belakang-K
 const posProp = { key: 'pos', label: 'Posisi di frame drone', type: 'select', options: POS, def: 'otomatis' };
 const motorDeco = (r, fill, extra = []) => [{ t: 'circle', x: 40, y: 40, r: 26, fill: '#2a2d33', stroke: '#111' }, ...extra, { t: 'rotor', x: 40, y: 40, r, fill }, { t: 'text', key: 'rpm', x: 40, y: 76, text: '0 rpm', size: 6.5, fill: '#222', bold: true }];
 const brushed = (tag, name, extra) => ({ tag, name, cat: 'Aktuator', sim: 'full', w: 80, h: 96, color: '#c9ced6', rx: 6, labelColor: '#222', pins: { b: ['+', '-'] }, label: false, ...extra });
+// 2WD robot car chassis: two TT gear motors (wires to ML± / MR±), 65 mm wheels, front caster. Parts placed on the plate
+// in Desain ride on the car in 3D; distance / line / obstacle sensors on it read the arena (walls, obstacles, black line).
+const tread = (x) => [...Array(11).keys()].map((i) => ({ t: 'rect', x: x + 4, y: 352 + i * 22, w: 66, h: 9, fill: '#2c2c2c', rx: 2 }));
+const ROBOT_SPECS = [
+  { tag: 'mod-car-chassis', name: 'Sasis Mobil Robot 2WD (RC / ESP-NOW)', cat: 'Robot', sim: 'full', underlay: true, w: 600, h: 700, body: false, label: false,
+    pins: { b: ['ML+', 'ML-', 'MR+', 'MR-'] }, labelColor: '#e5e7eb', pinFont: 6.5,
+    deco: [
+      { t: 'rect', x: 92, y: 14, w: 416, h: 672, rx: 44, fill: '#26303d', stroke: '#64748b', sw: 2 },
+      { t: 'grid', x: 132, y: 150, w: 336, h: 250, step: 24, fill: '#323e4f' },
+      { t: 'rect', x: 4, y: 344, w: 76, h: 252, rx: 20, fill: '#151515' }, ...tread(4), { t: 'rect', x: 28, y: 440, w: 28, h: 60, rx: 6, fill: '#f2c94c' },
+      { t: 'rect', x: 520, y: 344, w: 76, h: 252, rx: 20, fill: '#151515' }, ...tread(520), { t: 'rect', x: 544, y: 440, w: 28, h: 60, rx: 6, fill: '#f2c94c' },
+      { t: 'rect', x: 96, y: 438, w: 150, h: 64, rx: 8, fill: '#f2c94c', stroke: '#b58f1c' }, { t: 'rect', x: 354, y: 438, w: 150, h: 64, rx: 8, fill: '#f2c94c', stroke: '#b58f1c' },
+      { t: 'rotor', key: 'l', x: 120, y: 470, r: 18, fill: '#444' }, { t: 'rotor', key: 'r', x: 480, y: 470, r: 18, fill: '#444' },
+      { t: 'text', x: 185, y: 475, text: 'MOTOR KIRI', size: 11, fill: '#3b2f05', bold: true }, { t: 'text', x: 415, y: 475, text: 'MOTOR KANAN', size: 11, fill: '#3b2f05', bold: true },
+      { t: 'path', d: 'M170 502 C170 600 270 640 286 690 M190 502 C192 600 285 630 296 690', fill: 'none', stroke: '#ef4444', sw: 3 },
+      { t: 'path', d: 'M430 502 C430 600 330 640 314 690 M410 502 C408 600 315 630 305 690', fill: 'none', stroke: '#111827', sw: 3 },
+      { t: 'circle', x: 300, y: 96, r: 30, fill: '#9ca3af', stroke: '#4b5563', sw: 2 }, { t: 'circle', x: 300, y: 96, r: 14, fill: '#d1d5db' },
+      { t: 'path', d: 'M300 28 l-16 20 h32 z', fill: '#ef4444' }, { t: 'text', x: 300, y: 146, text: 'DEPAN', size: 13, fill: '#fca5a5', bold: true },
+      { t: 'text', x: 300, y: 560, text: 'SASIS 2WD · roda 65 mm', size: 13, fill: '#e5e7eb', bold: true },
+      { t: 'text', key: 'pose', x: 300, y: 590, text: 'posisi 0.00, 0.00 m · arah 0°', size: 12, fill: '#cbd5e1' },
+      { t: 'text', key: 'spd', x: 300, y: 612, text: '0.00 m/s', size: 12, fill: '#cbd5e1' }],
+    keywords: 'mobil robot rc car chassis sasis 2wd smart car esp-now espnow l298n roda motor tt penghindar halangan line follower',
+    pinDesc: { 'ML+': 'Motor kiri + (ke OUT1 L298N). ML+ lebih positif dari ML− = roda kiri maju', 'ML-': 'Motor kiri − (ke OUT2 L298N)', 'MR+': 'Motor kanan + (ke OUT3 L298N). MR+ lebih positif dari MR− = roda kanan maju', 'MR-': 'Motor kanan − (ke OUT4 L298N)' },
+    props: [{ key: 'arena', label: 'Arena 3D', type: 'select', options: ['Arena 2×2 m', 'Arena + rintangan', 'Lintasan garis hitam', 'Lantai bebas'], def: 'Arena + rintangan' },
+      { key: 'mass', label: 'Massa mobil', type: 'range', min: 200, max: 1500, step: 50, def: 600, unit: ' g' }] },
+];
 const DRONE_SPECS = [
   brushed('mod-motor-tt', 'Motor DC TT Gearbox 3–6V (robot)', { color: '#f2c94c', deco: [{ t: 'rect', x: 8, y: 14, w: 64, h: 40, fill: '#f2c94c', rx: 4, stroke: '#b58f1c' }, { t: 'rotor', x: 40, y: 34, r: 14, fill: '#333' }, { t: 'text', key: 'rpm', x: 40, y: 68, text: '0 rpm', size: 6.5, fill: '#222', bold: true }],
     keywords: 'motor dc tt gearbox gear kuning robot mobil roda 3v 5v 6v',
@@ -412,6 +438,8 @@ export const MODULE_SPECS = [
     props: [{ key: 'vf', label: 'Tegangan maju Vf (V)', type: 'select', options: ['0.3', '0.6', '0.7', '1.0'], def: '0.7' }] },
   // ===================== Motors, drone, LiPo, LIDAR
   ...DRONE_SPECS,
+  // ===================== Robot car (behaviour + driving physics in sim/car.js, 3D in ui/models3d.js / ui/view3d.js)
+  ...ROBOT_SPECS,
 ];
 
 

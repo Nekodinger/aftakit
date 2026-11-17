@@ -2,14 +2,16 @@
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" id="metaViewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#3f51b5" />
   <title>Simulator Rangkaian Arduino & IoT</title>
   <meta name="description" content="Simulator rangkaian & kode Arduino untuk iPad dan browser: 100+ komponen, breadboard, sensor IoT, I2C, pemeriksaan rangkaian ESP32, kompilasi sketch asli, bagikan lewat tautan." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233f51b5'/%3E%3Cpath d='M9 11h14M9 16h14M9 21h14' stroke='%23fff' stroke-width='2.4' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='11' r='2' fill='%23fff'/%3E%3Ccircle cx='23' cy='16' r='2' fill='%23fff'/%3E%3Ccircle cx='9' cy='21' r='2' fill='%23fff'/%3E%3C/svg%3E" />
-  <script>try { const t = localStorage.getItem('sim.theme'); if (t) document.documentElement.dataset.theme = t; } catch {}</script>
+  <script>try { const t = localStorage.getItem('sim.theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+  try { const m = localStorage.getItem('sim.device') || 'auto', w = Math.min(screen.width, innerWidth), c = matchMedia('(pointer: coarse)').matches;
+    document.documentElement.dataset.device = m !== 'auto' ? m : w < 700 ? 'phone' : (c || w < 1100) ? 'tablet' : 'laptop'; } catch {}</script>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -35,6 +37,10 @@
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
     <symbol id="i-chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-dev-laptop" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M2 19h20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-dev-tablet" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 18h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-dev-phone" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 18.5h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-dev-auto" viewBox="0 0 24 24"><rect x="2" y="6" width="13" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="16" y="9" width="6" height="11" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M1 18h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </svg>
 
@@ -62,7 +68,7 @@
                 <hr /><button data-act="rotate">Putar komponen <kbd>R</kbd></button>
                 <button data-act="duplicate">Duplikat <kbd>Ctrl D</kbd></button>
                 <button data-act="delete">Hapus <kbd>Del</kbd></button>
-                <hr /><button data-act="wire-text">Sambung kabel (tabel pin)…</button><button data-act="tidy-wires">Rapikan semua kabel</button><button data-act="bundle-wires">Bundel kabel (rapi jadi satu)</button><button data-act="auto-bb">Pasang di breadboard</button><hr /><button data-act="auto-wire">Auto wiring (sambung otomatis)</button><button data-act="auto-code">Auto kode (kode otomatis)…</button><button data-act="newbie">Mode Newbie (panduan belajar)</button><hr /><button data-act="clear-wires">Hapus semua kabel</button>
+                <hr /><button data-act="wire-text">Sambung kabel (tabel pin)…</button><button data-act="tidy-wires">Rapikan semua kabel</button><button data-act="bundle-wires">Bundel kabel (rapi jadi satu)</button><button data-act="auto-bb">Pasang di breadboard</button><hr /><button data-act="auto-wire">Auto wiring (sambung otomatis)</button><button data-act="newbie">Mode Newbie (panduan belajar)</button><hr /><button data-act="clear-wires">Hapus semua kabel</button>
               </div></div>
             <div class="menu" id="menuHelp"><button class="mb">Bantuan</button>
               <div class="menu-pop">
@@ -75,10 +81,17 @@
       <div class="modes" role="tablist" aria-label="Mode">
         <button class="mode on" data-mode="design" role="tab">Desain</button>
         <button class="mode" data-mode="code" role="tab">Kode</button>
-        <button class="mode" data-mode="simulate" role="tab">Simulasi</button>
         <button class="mode" data-mode="build" role="tab">Build</button>
       </div>
       <div class="actions">
+        <div class="menu" id="menuDevice"><button class="icon-btn mb-dev" id="btnDevice" title="Mode tampilan: Laptop / iPad / HP" aria-haspopup="true"><svg id="devIcon"><use href="#i-dev-laptop"/></svg></button>
+          <div class="menu-pop menu-right" role="menu">
+            <div class="menu-cap">Mode tampilan</div>
+            <button data-dev="auto" role="menuitemradio"><svg><use href="#i-dev-auto"/></svg>Otomatis <span class="muted small" id="devAutoInfo"></span></button>
+            <button data-dev="laptop" role="menuitemradio"><svg><use href="#i-dev-laptop"/></svg>Laptop / komputer</button>
+            <button data-dev="tablet" role="menuitemradio"><svg><use href="#i-dev-tablet"/></svg>iPad / tablet</button>
+            <button data-dev="phone" role="menuitemradio"><svg><use href="#i-dev-phone"/></svg>HP</button>
+          </div></div>
         <button id="btnTheme" class="icon-btn" title="Mode gelap/terang"><svg><use href="#i-moon"/></svg></button>
         <button id="btnShare" class="btn primary" title="Simpan ke database dan dapatkan tautan"><svg><use href="#i-share"/></svg><span>Bagikan</span></button>
       </div>
@@ -96,7 +109,6 @@
       <aside id="leftPanel" aria-label="Panel kiri">
         <section class="lp" data-lp="parts">
           <div class="lp-head"><div class="search"><input id="partSearch" type="search" placeholder="Cari komponen… (mis. relay, dht, esp32)" autocomplete="off" /></div>
-            <div class="seg" id="partFilter"><button class="on" data-f="all">Semua</button><button data-f="sim">Bisa disimulasikan</button></div>
             <div class="chips" id="catChips"></div></div>
           <div id="partList" class="scroll"></div>
           <div class="lp-foot muted" id="partCount"></div>
@@ -161,7 +173,6 @@
             </div>
             <div class="tb-group v3-keep learn-group">
               <button id="tbAutoWire" class="tb" title="Sambung otomatis: semua pin yang belum tersambung diberi pin mikrokontroler yang cocok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 14 10"/><path d="m15 4 1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/><path d="M14 14h4a2 2 0 0 1 2 2v4"/><path d="M4 6h4v4"/></svg><span>Auto wiring</span></button>
-              <button id="tbAutoCode" class="tb" title="Kode otomatis: buat program dari komponen dan sambungannya"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 7-5 5 5 5"/><path d="m16 7 5 5-5 5"/><path d="m13 4-2 16"/></svg><span>Auto kode</span></button>
               <button id="tbNewbie" class="tb" title="Mode Newbie: panduan langkah demi langkah merangkai, menulis kode, dan menguji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 9 12 4 2 9l10 5 10-5z"/><path d="M6 11v5c3 2.5 9 2.5 12 0v-5"/><path d="M22 9v6"/></svg><span>Newbie</span></button>
             </div>
             <div class="tb-group">
@@ -180,7 +191,8 @@
           <div class="code-head">
             <div class="code-tabs"><span class="file-tab">sketch.ino</span><span id="boardTarget" class="muted small"></span></div>
             <div class="code-actions">
-              <button id="btnCompile" class="btn"><span>Kompilasi</span></button>
+              <button id="btnAutoCode" class="btn" title="Kode otomatis: buat program dari komponen dan sambungannya di Desain"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 7-5 5 5 5"/><path d="m16 7 5 5-5 5"/><path d="m13 4-2 16"/></svg><span>Auto kode</span></button>
+              <button id="btnCompile" class="btn" title="Kompilasi kode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="m9 15 2 2 4-4"/></svg><span>Kompilasi</span></button>
               <button id="btnRun2" class="btn primary"><svg><use href="#i-play"/></svg><span>Jalankan</span></button>
             </div>
           </div>
@@ -221,6 +233,7 @@
             <button class="tab" data-tab="bt" id="tabBt" hidden>Bluetooth <span class="badge dot" id="btBadge" hidden></span></button>
             <button class="tab" data-tab="ftdi" id="tabFtdi" hidden>USB-Serial <span class="badge dot" id="ftdiBadge" hidden></span></button>
             <button class="tab" data-tab="drone" id="tabDrone" hidden>Drone</button>
+            <button class="tab" data-tab="now" id="tabNow" hidden>ESP-NOW <span class="badge dot" id="nowBadge" hidden></span></button>
             <button class="tab" data-tab="cam" id="tabCam" hidden>Kamera</button>
             <span class="grow"></span>
             <button class="mini" id="logClear" title="Bersihkan">Bersihkan</button>
@@ -254,6 +267,32 @@
               </div>
               <div class="tx-row"><button class="mini" id="droneReset">Reset drone</button><button class="mini" id="droneCharge">Isi baterai</button></div>
               <div class="muted small tx-help">Keyboard: W/S throttle, A/D yaw, panah = pitch/roll, Spasi = ARM.</div>
+            </div>
+          </div>
+          <div id="nowPane" hidden tabindex="0">
+            <div class="bt-head"><span class="dot" id="nowDot"></span><span id="nowName">ESP-NOW belum aktif (program belum memanggil esp_now_init)</span><span class="grow"></span><span class="muted small" id="nowMacs"></span></div>
+            <div class="now-body">
+              <div class="now-ctl">
+                <label class="now-fmt">Data yang dikirim remote
+                  <select id="nowFmt" aria-label="Format data ESP-NOW">
+                    <option value="char">Karakter perintah (1 byte)</option>
+                    <option value="joy32">Struct { int x; int y; int tombol; } (12 byte, −100…100)</option>
+                    <option value="joy8">Struct { uint8_t x; uint8_t y; uint8_t tombol; } (3 byte, 0…255)</option>
+                    <option value="text">Teks bebas</option>
+                  </select></label>
+                <div class="now-pad" id="nowPad" aria-label="Tombol arah remote">
+                  <button type="button" data-k="0" class="up" title="Maju (W / ↑)">▲</button>
+                  <button type="button" data-k="2" class="lf" title="Belok kiri (A / ←)">◀</button>
+                  <button type="button" data-k="4" class="st" title="Berhenti (Spasi)">■</button>
+                  <button type="button" data-k="3" class="rt" title="Belok kanan (D / →)">▶</button>
+                  <button type="button" data-k="1" class="dn" title="Mundur (S / ↓)">▼</button>
+                </div>
+                <label class="now-map" id="nowMapRow">Huruf maju · mundur · kiri · kanan · stop <input id="nowMap" value="F B L R S" maxlength="20" autocomplete="off" spellcheck="false" /></label>
+                <div class="now-joy" id="nowJoy" hidden><div class="stick" id="nowStick" title="Seret: x = kiri/kanan, y = maju/mundur"><div class="knob"></div><span class="val"></span><span class="lbl">Joystick</span></div>
+                  <button type="button" class="btn" id="nowBtn" title="tombol = 1 selama ditekan">Tombol</button></div>
+                <form id="nowForm"><input id="nowIn" placeholder="Teks, atau byte hex: 0x46 0x01" autocomplete="off" /><button class="btn" type="submit">Kirim</button></form>
+              </div>
+              <pre id="nowOut" class="scroll" aria-live="off"></pre>
             </div>
           </div>
           <div id="camPane" hidden>

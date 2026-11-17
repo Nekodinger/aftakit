@@ -56,6 +56,10 @@ ARD_IMPORT(wall_ms) double h_wall_ms(void);                                     
 ARD_IMPORT(jpeg_decode) int h_jpeg_decode(const uint8_t *src, int len, uint8_t *out, int cap, int *wh, int bgr); // -> bytes written
 ARD_IMPORT(jpeg_encode) int h_jpeg_encode(const uint8_t *rgb, int w, int h, int quality, int bgr, uint8_t *out, int cap); // cap 0 = size only
 ARD_IMPORT(nvs) int h_nvs(int op, const char *key, uint8_t *buf, int len);  // op 0=get 1=put 2=remove 3=clear
+// ESP-NOW: packets to / from the simulator's virtual partner board (ESP-NOW tab)
+ARD_IMPORT(espnow_init) int h_espnow_init(int on);                                     // 1 = init, 0 = deinit
+ARD_IMPORT(espnow_send) int h_espnow_send(const uint8_t *mac6, const uint8_t *data, int len);  // 0 = delivered
+ARD_IMPORT(espnow_recv) int h_espnow_recv(uint8_t *mac6, uint8_t *data, int cap);      // length, -1 = queue empty
 #ifdef __cplusplus
 }
 #endif

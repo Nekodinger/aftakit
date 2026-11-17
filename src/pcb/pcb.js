@@ -14,7 +14,7 @@ import { textStrokes, textWidth } from './font.js';
 
 export const PX = 1 / 3.7795;
 const isBB = (t) => /breadboard/.test(t);
-const OFFBOARD = new Set(['can', 'motor', 'servo', 'stepper', 'bat9v', 'cell18650', 'frame']);
+const OFFBOARD = new Set(['can', 'motor', 'servo', 'stepper', 'bat9v', 'cell18650', 'frame', 'car']);
 export const RULES = { grid: 0.5, clr: 0.2, signal: 0.35, power: 0.6, via: 0.8, viaDrill: 0.4, edge: 1.0, margin: 3 };
 const POWER = /^(GND|VCC|VIN|5V|3V3|3\.3V|VDD|VSS|V\+|BAT\+?|BAT-|\+|-|VBUS|VSYS|12V|E\+|E-)$/i;
 

@@ -50,7 +50,7 @@ export function generateSketch(circ) {
   for (const it of circ.items) {
     const c = { ...it, board, adcMax };
     const piece = codeFor(c);
-    if (!piece) { if (!/resistor|capacitor|diode|battery|breadboard|npn|mosfet/.test(it.type)) unknown.push(it.id); parts.push({ id: it.id, name: it.name, piece: null }); continue; }
+    if (!piece) { if (!/resistor|capacitor|diode|battery|breadboard|npn|mosfet|car-chassis|lipo|motor-|bldc/.test(it.type)) unknown.push(it.id); parts.push({ id: it.id, name: it.name, piece: null }); continue; }
     if (piece.todo) { glob.push(piece.todo); parts.push({ id: it.id, name: it.name, piece: null, todo: piece.todo }); continue; }
     addU(inc, piece.inc);
     glob.push(`// ${it.name} (${it.id})`, ...piece.glob);

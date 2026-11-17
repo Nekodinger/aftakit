@@ -38,6 +38,7 @@ export const S = {
   'wokwi-tilt-switch': { pcb: [0, 0, 0.82, 1], f: [['pipe', 'x', 0.28, 0.62, 0.52, 3, 0x3a7bd5, 3.2]] },
   'wokwi-ir-remote': { pcb: false, pins: 'pads', f: [['box', 0.02, 0.01, 0.98, 0.99, 8, 0xe9e9e9]] },
   'wokwi-rotary-dialer': { pcb: false, pins: 'pads', f: [['cyl', 0.5, 0.49, 0.47, 10, 0x222222]] },
+  'mod-car-chassis': { pcb: false, pins: 'pads', special: 'car' },
   'wokwi-hc-sr04': { pcb: [0, 0, 1, 0.86], f: [['cyl', 0.2, 0.43, 0.165, 12, C.silver], ['cyl', 0.8, 0.43, 0.165, 12, C.silver], ['box', 0.38, 0.03, 0.62, 0.15, 3.5, C.silver]] },
   'wokwi-dht22': { pcb: false, pins: 'legs', f: [['box', 0.02, 0, 0.98, 0.72, 7.7, C.white]] },
   'wokwi-mpu6050': { pcb: [0, 0, 1, 0.9], f: [['box', 0.4, 0.38, 0.6, 0.62, 1, C.ic]] },

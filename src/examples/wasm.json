@@ -48,5 +48,20 @@
   "file": "wasm/drone-fc-esp32-59031ea46f.wasm",
   "board": "esp32",
   "bytes": 209153
+ },
+ "car-espnow": {
+  "file": "wasm/car-espnow-b54cae284a.wasm",
+  "board": "esp32",
+  "bytes": 213746
+ },
+ "car-avoid": {
+  "file": "wasm/car-avoid-92a2379bc8.wasm",
+  "board": "esp32",
+  "bytes": 181924
+ },
+ "car-line": {
+  "file": "wasm/car-line-cf03a552af.wasm",
+  "board": "esp32",
+  "bytes": 209661
  }
 }

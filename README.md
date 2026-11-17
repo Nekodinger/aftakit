@@ -10,6 +10,10 @@ breadboard, pemeriksaan rangkaian, ramah layar sentuh. Semua komponen di katalog
   jadi library asli Blynk, UniversalTelegramBot, PubSubClient (MQTT), ThingSpeak bekerja dengan API key asli.
 - Library Manager otomatis: `#include` yang belum ada diunduh dari indeks Arduino Library Manager (`server/libmgr.py`).
 - Library .zip (mis. ekspor Edge Impulse "Arduino library") lewat panel Library; `img_converters.h` (`fmt2rgb888`) didukung.
+- ESP-NOW (`esp_now.h` ESP32, callback 2.x dan 3.x; `espnow.h` ESP8266) → tab ESP-NOW: remote virtual (tombol arah / joystick struct / teks) dan log paket dari board.
+- Sasis mobil robot 2WD (`mod-car-chassis`): dua motor TT, kinematika diferensial, arena 3D (dinding, rintangan, lintasan garis). Komponen di atas sasis ikut bergerak di 3D; HC-SR04 / VL53L0X / FC-51 / TCRT5000 di atasnya membaca arena (`src/sim/car.js`).
+- 3D: benda di sekitar sensor (dinding yang bisa diseret untuk sensor jarak, tangki air, tanah, tetes hujan, lampu LDR, lilin sensor api) — `src/ui/scene3d.js`.
+- Mode tampilan Laptop / iPad / HP (otomatis atau dipilih), termasuk pratinjau berbingkai — `src/ui/device.js`.
 
 ## Komponen protokol (dimodelkan sampai level register / pin, diuji dengan library asli)
 - 1-Wire: DS18B20 (OneWire + DallasTemperature, beberapa sensor satu jalur). Dua kabel: TM1637, HX711.
@@ -27,9 +31,9 @@ breadboard, pemeriksaan rangkaian, ramah layar sentuh. Semua komponen di katalog
 
 ## Perintah
 - `npm run dev` / `npm run build`
-- `node scripts/build_examples.mjs` — kompilasi ulang semua contoh (butuh avr-gcc + wasi-sdk).
+- `node scripts/build_examples.mjs` — kompilasi ulang semua contoh (butuh avr-gcc + wasi-sdk); `--only id1,id2` hanya contoh ESP32/ESP8266 tertentu.
 - Tes: `bash scripts/run_all.sh` (semua suite AVR + WebAssembly), atau satu per satu `node scripts/test_core.mjs`, `test_parts1..6`,
-  `test_mega`, `test_attiny`, `test_nanorp2040`, `test_*_esp32`, `test_gateway` (butuh `amqtt`);
+  `test_mega`, `test_attiny`, `test_espnow`, `test_car`, `test_nanorp2040`, `test_*_esp32`, `test_gateway` (butuh `amqtt`);
   browser: `scripts/e2e3.py`, `e2e4.py`, `e2e5.py`, `e2e6.py`.
 
 ## Variabel lingkungan (Vercel)

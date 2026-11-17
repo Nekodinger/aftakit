@@ -17,6 +17,11 @@ IPAddress WiFiClass::gatewayIP() { return info_ip(1); }
 IPAddress WiFiClass::subnetMask() { return IPAddress(255, 255, 255, 0); }
 IPAddress WiFiClass::dnsIP(uint8_t) { return info_ip(1); }
 String WiFiClass::macAddress() { char b[32] = {0}; h_wifi_info(2, b, sizeof b); return String(b); }
+uint8_t *WiFiClass::macAddress(uint8_t *mac) {
+  char b[32] = {0}; h_wifi_info(2, b, sizeof b); unsigned v[6] = {0};
+  if (mac && sscanf(b, "%x:%x:%x:%x:%x:%x", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) == 6) for (int i = 0; i < 6; i++) mac[i] = (uint8_t)v[i];
+  return mac;
+}
 int32_t WiFiClass::RSSI() { char b[16] = {0}; h_wifi_info(3, b, sizeof b); return atoi(b); }
 int16_t WiFiClass::scanNetworks(bool, bool) { char b[8] = {0}; h_wifi_info(10, b, sizeof b); _scanned = true; return (int16_t)atoi(b); }
 String WiFiClass::SSID(uint8_t i) { char b[40] = {0}; h_wifi_info(100 + i, b, sizeof b); return String(b); }

@@ -33,7 +33,7 @@ export class WasmBoard {
     this.events = []; this.cpu.cycles = 0; this.faults = [];
     this.analog = {}; this.mode = {}; this.out = {}; this.ext = {}; this.irq = {}; this.irqCount = {};
     for (const name of Object.keys(this.pinMap)) this.pins[name] = { level: null, last: 0, lastRise: -1, lastFall: -1, pulse: -1, duty: null, freq: 0, servo: false };
-    this.serialIn = []; this.portIn = {}; this.btIn = []; this.wifi = { ssid: '', since: -1 }; this.httpResp = new Uint8Array(0);
+    this.serialIn = []; this.portIn = {}; this.btIn = []; this.nowIn = []; this.nowOn = false; this.wifi = { ssid: '', since: -1 }; this.httpResp = new Uint8Array(0);
     this.bootWall = Date.now(); this.state = 'idle'; this.inst = null; this.dirty = false; this.calls = 0; this.fx = 0; this._fxSeen = -1; this.idle = 0;
   }
   driveLevel(name) { const m = this.mode[name]; if (m !== 'out') return null; const p = this.pins[name]; if (p.freq > 0 && p.duty !== null) return p.duty > 0.5 ? 1 : 0; return this.out[name] ? 1 : 0; }
@@ -52,6 +52,8 @@ export class WasmBoard {
   serialWrite(b) { this.serialIn.push(b); }
   serialIn2(port, b) { this.fx++; if (port === 0) this.serialIn.push(b); else (this.portIn[port] ||= []).push(b); }
   btWrite(text) { for (const b of te.encode(text)) this.btIn.push(b); }
+  /** ESP-NOW packet from the virtual partner board (mac: 6 bytes, data: Uint8Array) */
+  espnowPush(mac, data) { if (this.nowIn.length < 64) { this.nowIn.push({ mac: Uint8Array.from(mac), data: Uint8Array.from(data).slice(0, 1470) }); this.fx++; } }
 
   // ------------------------------------------------------------------ program loading
   async loadWasm(bytes) {
@@ -318,6 +320,17 @@ export class WasmBoard {
       bt_write(ptr, n) { self.fx++; self.host.btOut(self.u8.slice(ptr, ptr + n)); },
       bt_available() { return self.btIn.length; },
       bt_read() { return self.btIn.length ? self.btIn.shift() : -1; },
+      espnow_init(on) { self.nowOn = !!on; if (!on) self.nowIn = []; self.host.espnow?.({ type: on ? 'init' : 'deinit' }); return 1; },
+      espnow_send(macPtr, ptr, n) {
+        self.fx++; self.cpu.cycles += 300 * US;                // ~0.3 ms on air (250 bytes at 1 Mbps + ACK)
+        const r = self.host.espnow?.({ type: 'send', mac: self.u8.slice(macPtr, macPtr + 6), data: self.u8.slice(ptr, ptr + n) });
+        return r === false ? 1 : 0;
+      },
+      espnow_recv(macPtr, ptr, cap) {
+        if (!self.nowIn.length) return -1;
+        const pk = self.nowIn.shift(), n = Math.min(cap, pk.data.length);
+        self.u8.set(pk.mac.subarray(0, 6), macPtr); self.u8.set(pk.data.subarray(0, n), ptr); self.fx++; return n;
+      },
       random32() { return (Math.random() * 2 ** 32) >>> 0; },
       log(level, ptr, n) { const t = td.decode(self.u8.slice(ptr, ptr + n)); level ? sim().warn('rt:' + t, t) : sim().info(t); },
       cam_frame(out, cap, whPtr) {

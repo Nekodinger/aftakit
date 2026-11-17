@@ -9,6 +9,7 @@ import { checkDesign } from './sim/drc.js';
 import { CircuitCanvas } from './ui/canvas.js';
 import { Editor } from './ui/editor.js';
 import { initDroneView } from './ui/droneview.js';
+import { initDevice, setDeviceMode, onDeviceChange, isNarrow, isPhone, effectiveDevice, DEVICE_NAMES } from './ui/device.js';
 import { compile, loadSettings, saveSettings, testServer, compileEndpoint, parseDiagnostics, gatewayUrl, compileBase } from './compile.js';
 import { putZip, getZip, sha256, describeZip } from './libs.js';
 import { saveProject, loadProject, sharingAvailable } from './store.js';
@@ -16,6 +17,7 @@ import { EXAMPLES, exampleModel, EXAMPLE_GROUPS } from './examples/defs.js';
 import { exampleHexText, hasExampleHex, exampleWasm, hasExampleWasm } from './examples/pack.js';
 
 registerParts();
+initDevice();
 const $ = (s) => document.querySelector(s);
 
 // Reliable taps on iPad: fire the button on touch pointerup (no 300 ms delay, works even when the browser
@@ -36,7 +38,6 @@ const $ = (s) => document.querySelector(s);
 })();
 const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const isNarrow = () => window.matchMedia('(max-width: 1100px)').matches;
 const isTouch = () => window.matchMedia('(pointer: coarse)').matches;
 
 const DEFAULT_CODE = `void setup() {\n  // jalankan sekali\n}\n\nvoid loop() {\n  // diulang terus-menerus\n}\n`;
@@ -71,7 +72,7 @@ canvas.on('select', (s) => {
   const part = s?.kind === 'part';
   for (const id of ['#tbRotL', '#tbRotR', '#tbDup']) $(id).disabled = !part;
   $('#tbDel').disabled = !s;
-  if (state.panel === 'props' || (state.mode === 'simulate' && s && !isNarrow())) showPanel('props', true);
+  if (state.panel === 'props' || (sim.running && s && !isNarrow())) showPanel('props', true);
 });
 canvas.on('attrs', () => { if (state.panel === 'props') renderProps(true); });
 canvas.on('history', ({ canUndo, canRedo }) => { $('#tbUndo').disabled = !canUndo; $('#tbRedo').disabled = !canRedo; });
@@ -91,7 +92,7 @@ function addLog(level, text, extra = {}) {
   if (level === 'error') { errCount++; const b = $('#logBadge'); b.hidden = false; b.textContent = errCount; if ($('#console').classList.contains('collapsed')) $('#console').classList.remove('collapsed'); }
 }
 $('#logList').addEventListener('click', (e) => { const a = e.target.closest('a.jump'); if (a) { setMode('code'); editor.goto(+a.dataset.line, +a.dataset.col); } });
-$('#logClear').onclick = () => { if (consoleTab === 'serial') { serialText = ''; $('#serialOut').textContent = ''; } else if (consoleTab === 'bt') $('#btOut').textContent = ''; else if (consoleTab === 'ftdi') ftdiClear(); else { $('#logList').textContent = ''; errCount = 0; $('#logBadge').hidden = true; } };
+$('#logClear').onclick = () => { if (consoleTab === 'serial') { serialText = ''; $('#serialOut').textContent = ''; } else if (consoleTab === 'bt') $('#btOut').textContent = ''; else if (consoleTab === 'ftdi') ftdiClear(); else if (consoleTab === 'now') $('#nowOut').textContent = ''; else { $('#logList').textContent = ''; errCount = 0; $('#logBadge').hidden = true; } };
 $('#consoleToggle').onclick = () => { $('#console').classList.toggle('collapsed'); requestAnimationFrame(() => canvas._applyView()); };
 sim.on('log', (l) => addLog(l.level, l.text, { t: l.t }));
 
@@ -129,7 +130,8 @@ function showConsole(name) {
   $$('[data-tab]').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
   $('#logList').hidden = name !== 'log'; $('#serialPane').hidden = name !== 'serial';
   $('#btPane').hidden = name !== 'bt'; $('#camPane').hidden = name !== 'cam'; $('#ftdiPane').hidden = name !== 'ftdi';
-  $('#dronePane').hidden = name !== 'drone'; $('#console').classList.toggle('tall', name === 'drone'); droneView?.show(name === 'drone');
+  $('#dronePane').hidden = name !== 'drone'; $('#nowPane').hidden = name !== 'now'; $('#console').classList.toggle('tall', name === 'drone'); $('#console').classList.toggle('mid', name === 'now'); droneView?.show(name === 'drone');
+  if (name === 'now') $('#nowBadge').hidden = true;
   if (name === 'serial') $('#serialBadge').hidden = true;
   if (name === 'bt') $('#btBadge').hidden = true;
   if (name === 'ftdi') $('#ftdiBadge').hidden = true;
@@ -167,6 +169,89 @@ function btSend(text) {
 }
 $('#btForm').onsubmit = (e) => { e.preventDefault(); const i = $('#btIn'); if (i.value) btSend(i.value); i.value = ''; };
 $$('[data-bt]').forEach((b) => (b.onclick = () => btSend(b.dataset.bt)));
+// ------------------------------------------------------------------ ESP-NOW tab: a virtual partner board (remote control)
+const NOW_REMOTE = [0x24, 0x6f, 0x28, 0xaa, 0xbb, 0xcc], hex2 = (b) => b.toString(16).padStart(2, '0').toUpperCase();
+const macStr = (m) => [...m].map(hex2).join(':');
+const nowOut = $('#nowOut'); let nowSentLast = '', nowRepeat = null, nowJoy = { x: 0, y: 0, b: 0 }, nowJoyT = 0;
+$('#nowMacs').textContent = `remote ${macStr(NOW_REMOTE)} · board 24:A1:60:2E:3C:10`;
+function nowLog(text, cls) {
+  const sp = document.createElement('span'); sp.className = cls; sp.textContent = text + '\n'; nowOut.append(sp);
+  while (nowOut.childNodes.length > 500) nowOut.firstChild.remove();
+  nowOut.scrollTop = nowOut.scrollHeight;
+}
+const printable = (b) => [...b].map((c) => (c >= 32 && c < 127 ? String.fromCharCode(c) : '.')).join('');
+const nowDescribe = (b) => `${b.length} byte  "${printable(b).slice(0, 48)}"  ${[...b.slice(0, 24)].map(hex2).join(' ')}${b.length > 24 ? ' …' : ''}`;
+function nowSend(bytes, quiet) {
+  if (!sim.running) { toast('Jalankan simulasi dulu untuk mengirim paket ESP-NOW.', true); return false; }
+  if (!sim.espnowActive) { toast('Program belum memanggil esp_now_init().', true); return false; }
+  sim.espnowSend(NOW_REMOTE, bytes);
+  const d = nowDescribe(bytes);
+  if (!quiet || d !== nowSentLast) nowLog(`→ ${d}`, 'me'); nowSentLast = d;
+  return true;
+}
+sim.on('espnow', (e) => {
+  if (e.type === 'init') { $('#nowDot').className = 'dot on'; $('#nowName').textContent = 'ESP-NOW aktif (esp_now_init). Remote virtual siap.'; $('#tabNow').hidden = false; nowLog('· esp_now_init() — board siap menerima', 'sys'); }
+  else if (e.type === 'deinit') { $('#nowDot').className = 'dot'; $('#nowName').textContent = 'ESP-NOW dimatikan (esp_now_deinit).'; }
+  else if (e.type === 'send') { nowLog(`← dari board ke ${macStr(e.mac)}: ${nowDescribe(e.data)}`, 'rx'); if (consoleTab !== 'now') $('#nowBadge').hidden = false; }
+});
+sim.on('state', (s) => { if (s !== 'running') { $('#nowDot').className = 'dot'; clearInterval(nowRepeat); nowRepeat = null; } });
+const nowFmt = () => $('#nowFmt').value;
+const nowMap = () => { const m = $('#nowMap').value.trim().split(/\s+/); return ['F', 'B', 'L', 'R', 'S'].map((d, i) => (m[i] || d)[0]); };
+function joyBytes() {
+  if (nowFmt() === 'joy8') return Uint8Array.from([Math.round((nowJoy.x + 100) * 1.275), Math.round((nowJoy.y + 100) * 1.275), nowJoy.b]);
+  const b = new Uint8Array(12), dv = new DataView(b.buffer); dv.setInt32(0, nowJoy.x, true); dv.setInt32(4, nowJoy.y, true); dv.setInt32(8, nowJoy.b, true); return b;
+}
+// direction pad: hold to repeat (5 packets / s like a real remote), release sends "stop" in character mode
+const PAD_JOY = [[0, 100], [0, -100], [-100, 0], [100, 0], [0, 0]];
+function padPress(k) {
+  const f = nowFmt();
+  const once = () => {
+    if (f === 'char' || f === 'text') return nowSend(Uint8Array.from([nowMap()[k].charCodeAt(0) & 0xff]), true);
+    [nowJoy.x, nowJoy.y] = PAD_JOY[k]; return nowSend(joyBytes(), true);
+  };
+  clearInterval(nowRepeat); if (once() && k !== 4) nowRepeat = setInterval(once, 200);
+  $$('#nowPad button').forEach((b) => b.classList.toggle('on', +b.dataset.k === k && k !== 4));
+}
+function padRelease() {
+  if (!nowRepeat) { $$('#nowPad button').forEach((b) => b.classList.remove('on')); return; }
+  clearInterval(nowRepeat); nowRepeat = null; $$('#nowPad button').forEach((b) => b.classList.remove('on'));
+  if (nowFmt() === 'char' || nowFmt() === 'text') nowSend(Uint8Array.from([nowMap()[4].charCodeAt(0) & 0xff]), true);
+  else { nowJoy.x = 0; nowJoy.y = 0; nowSend(joyBytes(), true); }
+}
+$('#nowPad').addEventListener('pointerdown', (e) => { const b = e.target.closest('[data-k]'); if (!b) return; e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch { /* synthetic */ } padPress(+b.dataset.k); });
+for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) $('#nowPad').addEventListener(ev, () => padRelease());
+$('#nowPad').addEventListener('click', (e) => e.preventDefault());
+const NOW_KEYS = { ArrowUp: 0, w: 0, ArrowDown: 1, s: 1, ArrowLeft: 2, a: 2, ArrowRight: 3, d: 3, ' ': 4 };
+$('#nowPane').addEventListener('keydown', (e) => { if (e.target.closest('input, select')) return; const k = NOW_KEYS[e.key]; if (k === undefined || e.repeat) return; e.preventDefault(); padPress(k); });
+$('#nowPane').addEventListener('keyup', (e) => { if (e.target.closest('input, select')) return; if (NOW_KEYS[e.key] !== undefined) { e.preventDefault(); padRelease(); } });
+// joystick (struct modes)
+const syncNowFmt = () => { const joy = nowFmt().startsWith('joy'); $('#nowJoy').hidden = !joy; $('#nowMapRow').hidden = joy || nowFmt() === 'text'; };
+$('#nowFmt').onchange = () => { syncNowFmt(); nowLog(`· format kirim: ${$('#nowFmt').selectedOptions[0].textContent}`, 'sys'); };
+syncNowFmt();
+(() => {
+  const st = $('#nowStick'), knob = st.querySelector('.knob'), val = st.querySelector('.val'); let id = null;
+  const show = () => { knob.style.transform = `translate(${nowJoy.x * 0.42}px, ${-nowJoy.y * 0.42}px)`; val.textContent = `x ${nowJoy.x} · y ${nowJoy.y}`; };
+  const move = (e) => {
+    const r = st.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * 2 - 1, y = (e.clientY - r.top) / r.height * 2 - 1;
+    nowJoy.x = Math.round(Math.max(-1, Math.min(1, x)) * 100); nowJoy.y = Math.round(-Math.max(-1, Math.min(1, y)) * 100); show();
+    const now = performance.now(); if (now - nowJoyT > 60) { nowJoyT = now; nowSend(joyBytes(), true); }
+  };
+  st.addEventListener('pointerdown', (e) => { id = e.pointerId; try { st.setPointerCapture(id); } catch { /* synthetic */ } move(e); });
+  st.addEventListener('pointermove', (e) => { if (e.pointerId === id) move(e); });
+  const end = (e) => { if (e.pointerId !== id) return; id = null; nowJoy.x = 0; nowJoy.y = 0; show(); if (sim.running) nowSend(joyBytes(), true); };
+  st.addEventListener('pointerup', end); st.addEventListener('pointercancel', end);
+  show();
+  const btn = $('#nowBtn');
+  btn.addEventListener('pointerdown', () => { nowJoy.b = 1; nowSend(joyBytes(), true); btn.classList.add('primary'); });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, () => { if (!nowJoy.b) return; nowJoy.b = 0; btn.classList.remove('primary'); nowSend(joyBytes(), true); });
+})();
+// free text / hex bytes
+$('#nowForm').onsubmit = (e) => {
+  e.preventDefault(); const v = $('#nowIn').value; if (!v) return;
+  const hex = /^\s*(0x[0-9a-f]{1,2}\s*)+$/i.test(v) ? v.trim().split(/\s+/).map((h) => parseInt(h, 16)) : null;
+  if (nowSend(hex ? Uint8Array.from(hex) : new TextEncoder().encode(v))) $('#nowIn').value = '';
+};
+
 // ------------------------------------------------------------------ Drone tab: 3D view + RC transmitter
 droneView = initDroneView(sim, { canvas: $('#droneCanvas'), stickL: $('#stickL'), stickR: $('#stickR'), sw5: $('#sw5'), sw6: $('#sw6'), btnReset: $('#droneReset'), btnCharge: $('#droneCharge'), note: $('#droneNote') });
 const DRONE_TYPES = new Set(['mod-drone-frame', 'mod-esc', 'mod-rc-rx', 'mod-bldc-a2212', 'mod-bldc-2205']);
@@ -257,7 +342,9 @@ function updateBoardTabs() {
   if (!hadDrone && !$('#tabDrone').hidden && [...canvas.parts.values()].some((p) => p.type === 'mod-drone-frame')) addLog('info', 'Tab Drone tersedia: tampilan 3D, telemetri, dan remote (stik) untuk receiver RC.');
   if (ftdis.join() !== [...sel.options].map((o) => o.value).join()) { const cur = sel.value; sel.innerHTML = ftdis.map((id) => `<option value="${id}">${id}</option>`).join(''); if (ftdis.includes(cur)) sel.value = cur; }
   sel.hidden = ftdis.length < 2;
-  if ((consoleTab === 'bt' && $('#tabBt').hidden) || (consoleTab === 'cam' && $('#tabCam').hidden) || (consoleTab === 'ftdi' && $('#tabFtdi').hidden) || (consoleTab === 'drone' && $('#tabDrone').hidden)) showConsole('log');
+  const hadNow = !$('#tabNow').hidden; $('#tabNow').hidden = !(['esp32', 'esp8266'].includes(kind) && /#\s*include\s*[<"](esp_now|espnow)\.h/.test(editor.value)) && !sim.espnowActive;
+  if (!hadNow && !$('#tabNow').hidden) addLog('info', 'Tab ESP-NOW tersedia: remote virtual (tombol arah / joystick) mengirim paket ESP-NOW ke board, paket dari board tampil di sana.');
+  if ((consoleTab === 'bt' && $('#tabBt').hidden) || (consoleTab === 'cam' && $('#tabCam').hidden) || (consoleTab === 'ftdi' && $('#tabFtdi').hidden) || (consoleTab === 'drone' && $('#tabDrone').hidden) || (consoleTab === 'now' && $('#tabNow').hidden)) showConsole('log');
 }
 
 // ------------------------------------------------------------------ user libraries (.zip) + gateway info
@@ -291,10 +378,9 @@ function setMode(m) {
   state.mode = m; $('#workspace').dataset.mode = m;
   $$('.mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
   if (m === 'code') requestAnimationFrame(() => editor._sync());
-  if (m === 'simulate') { $('#console').classList.remove('collapsed'); if (!isNarrow()) showPanel('props', true); }
   if (m === 'design' && !isNarrow() && state.panel === 'props' && !canvas.selected) showPanel('parts', true);
   if (m === 'build') updateBuildView();
-  if (m === 'design' || m === 'simulate') requestAnimationFrame(() => { canvas._applyView(); if (!state.fittedOnce) { canvas.fit(); state.fittedOnce = true; } });
+  if (m === 'design') requestAnimationFrame(() => { canvas._applyView(); if (!state.fittedOnce) { canvas.fit(); state.fittedOnce = true; } });
 }
 $$('.mode').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
 function showPanel(name, force) {
@@ -416,7 +502,8 @@ const currentProg = (b) => (b?.runnable || state.hexOnly ? (runtimeOf(b) !== 'av
 async function run() {
   if (state.busy) return; state.busy = true; $('#btnRun').disabled = true;
   try {
-    if (state.mode !== 'simulate') setMode('simulate');
+    if (state.mode !== 'design') setMode('design');
+    if (!isPhone()) $('#console').classList.remove('collapsed');
     const b = boardOf();
     if (b?.runnable || state.hexOnly) {
       if (!state.hexOnly && (state.hexFor !== progKey(b) + '|' + state.libs.map((l) => l.sha).join(',') + '|' + editor.value || !currentProg(b))) { if (!(await doCompile())) return; }
@@ -467,11 +554,10 @@ for (const id of ['#tbRotL', '#tbRotR', '#tbDup', '#tbDel']) $(id).disabled = tr
 window.addEventListener('resize', () => canvas._applyView());
 
 // ------------------------------------------------------------------ palette (cards with live thumbnails, tap or drag to add)
-let partFilter = 'all', partCat = 'Semua';
+let partCat = 'Semua';
 const chips = $('#catChips');
 chips.innerHTML = ['Semua', ...CATEGORIES].map((c) => `<button class="chip${c === 'Semua' ? ' on' : ''}" data-c="${esc(c)}">${esc(c)}</button>`).join('');
 chips.onclick = (e) => { const b = e.target.closest('.chip'); if (!b) return; partCat = b.dataset.c; chips.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === b)); renderPalette(); };
-$('#partFilter').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; partFilter = b.dataset.f; $$('#partFilter button').forEach((x) => x.classList.toggle('on', x === b)); renderPalette(); };
 const thumbObserver = new IntersectionObserver((entries) => {
   for (const en of entries) {
     if (!en.isIntersecting) continue; const box = en.target; thumbObserver.unobserve(box);
@@ -490,21 +576,20 @@ function renderPalette() {
   const q = $('#partSearch').value.trim().toLowerCase(), host = $('#partList'); host.textContent = ''; let n = 0;
   for (const cat of CATEGORIES) {
     if (partCat !== 'Semua' && cat !== partCat) continue;
-    const items = CATALOG.filter((c) => c.cat === cat && (partFilter === 'all' || c.sim === 'full') && (!q || (c.name + ' ' + c.tag + ' ' + (c.keywords || '')).toLowerCase().includes(q)));
+    const items = CATALOG.filter((c) => c.cat === cat && (!q || (c.name + ' ' + c.tag + ' ' + (c.keywords || '')).toLowerCase().includes(q)));
     if (!items.length) continue;
     const h = document.createElement('div'); h.className = 'cat'; h.textContent = `${cat} · ${items.length}`; host.append(h);
     const grid = document.createElement('div'); grid.className = 'grid'; host.append(grid);
     for (const c of items) {
       n++;
       const card = document.createElement('div'); card.className = 'card'; card.dataset.tag = c.tag; card.title = c.name;
-      const tag = c.sim === 'full' ? ['sim', 'SIM'] : c.sim === 'design' ? ['design', 'DESAIN'] : ['visual', 'GAMBAR'];
-      card.innerHTML = `<span class="tag ${tag[0]}">${tag[1]}</span><div class="thumb" data-tag="${c.tag}"></div><span class="nm">${esc(c.name)}</span>`;
+      card.innerHTML = `<div class="thumb" data-tag="${c.tag}"></div><span class="nm">${esc(c.name)}</span>`;
       grid.append(card); thumbObserver.observe(card.querySelector('.thumb'));
       bindCard(card, c);
     }
   }
   if (!n) host.innerHTML = '<div class="prop-empty">Tidak ada komponen yang cocok.</div>';
-  $('#partCount').textContent = `${CATALOG.length} komponen · ${CATALOG.filter((c) => c.sim === 'full').length} disimulasikan · SIM = disimulasikan, DESAIN = cek kabel, GAMBAR = tampilan`;
+  $('#partCount').textContent = n === CATALOG.length ? `${n} komponen · semua bisa disimulasikan` : `${n} dari ${CATALOG.length} komponen`;
 }
 function bindCard(card, c) {
   let st = null; const ghost = $('#dragGhost');
@@ -534,13 +619,13 @@ function bindCard(card, c) {
   card.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 async function addPart(tag, x, y) {
-  if (state.mode !== 'design' && state.mode !== 'simulate') setMode('design');
+  if (state.mode !== 'design') setMode('design');
   const id = await canvas.addPart(tag, Math.round(x / 5) * 5, Math.round(y / 5) * 5);
   if (id && isNarrow()) $('#workspace').classList.add('lp-closed'), $$('.rail-btn').forEach((b) => b.classList.remove('on'));
   if (id) toast(`${BY_TAG[tag].name} ditambahkan (${id})`);
 }
 function addAtCenter(tag) {
-  if (state.mode !== 'design' && state.mode !== 'simulate') setMode('design');
+  if (state.mode !== 'design') setMode('design');
   const r = $('#viewport').getBoundingClientRect(), c = canvas.toWorld(r.left + r.width / 2, r.top + r.height / 2);
   // look for a free spot near the centre (spiral search) so new parts don't land on top of the board
   const boxes = [...canvas.parts.values()].filter((p) => !BY_TAG[p.type]?.breadboard).map((p) => [p.left - 15, p.top - 25, p.left + p.size[0] + 15, p.top + p.size[1] + 15]);
@@ -621,6 +706,7 @@ const HINTS = {
   'wokwi-stepper-motor': 'Gunakan driver (L298N/ULN2003/A4988). Library Stepper/AccelStepper. 200 langkah = 1 putaran (1,8°).',
   'wokwi-heart-beat-sensor': 'OUT berupa denyut digital sesuai BPM.', 'wokwi-rotary-dialer': 'Pin DIAL dan PULSE pakai INPUT_PULLUP; hitung pulsa saat DIAL LOW.',
   'wokwi-ir-receiver': 'Library IRremote: IrReceiver.begin(pin). Tekan tombol remote IR di kanvas. Protokol NEC.',
+  'mod-car-chassis': 'Sasis 2WD: ML+/ML− ke OUT1/OUT2 dan MR+/MR− ke OUT3/OUT4 driver L298N. ML+ lebih positif = roda kiri maju. Letakkan ESP32, driver, baterai dan sensor di atas sasis: di 3D semuanya ikut mobil. HC-SR04 / VL53L0X / FC-51 / TCRT5000 di atas sasis membaca arena (dinding, rintangan, garis hitam). Tekan 3D lalu Jalankan.',
 };
 const WIRE_COLORS = ['#e11d48', '#1f2937', '#f5a524', '#2fbf71', '#3d8bfd', '#a855f7', '#06b6d4', '#fb923c', '#ffffff'];
 function renderProps(soft) {
@@ -641,8 +727,8 @@ function renderProps(soft) {
     return;
   }
   host.dataset.pid = part.id;
-  const badge = cat?.sim === 'full' ? ['#e3f6ea', '#17803f', 'Disimulasikan'] : cat?.sim === 'design' ? ['#fff3db', '#9a6400', 'Mode desain: wiring dicek, kode tidak dijalankan'] : ['#eceff3', '#6b7385', 'Tampilan saja (tidak disimulasikan)'];
-  let html = `<div class="prop-h"><b>${esc(cat?.name || part.type)}</b><code>${esc(part.id)}</code></div><span class="prop-badge" style="background:${badge[0]};color:${badge[1]}">${badge[2]}</span>`;
+  const badge = cat?.sim === 'design' ? ['#fff3db', '#9a6400', 'Mode desain: wiring dicek, kode tidak dijalankan'] : cat?.sim === 'visual' ? ['#eceff3', '#6b7385', 'Tampilan saja'] : null;
+  let html = `<div class="prop-h"><b>${esc(cat?.name || part.type)}</b><code>${esc(part.id)}</code></div>${badge ? `<span class="prop-badge" style="background:${badge[0]};color:${badge[1]}">${badge[2]}</span>` : ''}`;
   for (const p of cat?.props || []) {
     const v = part.attrs[p.key];
     if (p.type === 'select') html += `<div class="prop-row"><label>${esc(p.label)}</label><select data-k="${p.key}">${p.options.map((o) => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>`;
@@ -692,8 +778,9 @@ async function loadExample(id) {
   stopSim(); await canvas.setModel(exampleModel(ex));
   try {                                                        // examples are built on a breadboard, with right-angle wiring
     const { autoBreadboard } = await import('./ui/autobb.js');
-    state.autobb = [...canvas.parts.values()].some((p) => BY_TAG[p.type]?.breadboard) ? { ok: true, existing: true } : await autoBreadboard(canvas, BY_TAG, { tidy: false });
-    canvas.bundleWires(); canvas.history = []; canvas.hpos = -1; canvas.snapshot();
+    state.autobb = ex.noBB || [...canvas.parts.values()].some((p) => BY_TAG[p.type]?.breadboard) ? { ok: true, existing: true } : await autoBreadboard(canvas, BY_TAG, { tidy: false });
+    if (ex.noBB) canvas.tidyWires(); else canvas.bundleWires();
+    canvas.history = []; canvas.hpos = -1; canvas.snapshot();
   } catch (e) { console.warn('breadboard layout', e); }
   editor.value = ex.code; state.exampleId = id; state.projectId = null; state.libs = []; renderLibs(); state.hex = null; state.wasm = null; state.hexFor = null; state.hexOnly = false;
   $('#projectTitle').value = ex.title; editor.marks.clear();
@@ -708,7 +795,18 @@ exl.innerHTML = EXAMPLE_GROUPS.map((g) => `<div class="ex-group">${esc(g)}</div>
 exl.onclick = (e) => { const b = e.target.closest('[data-ex]'); if (b) loadExample(b.dataset.ex); };
 
 function closeMenus() { $$('.menu.open').forEach((m) => m.classList.remove('open')); }
-$$('.menu > .mb').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const m = b.parentElement, o = m.classList.contains('open'); closeMenus(); if (!o) m.classList.add('open'); }));
+$$('.menu > .mb, #btnDevice').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const m = b.parentElement, o = m.classList.contains('open'); closeMenus(); if (!o) m.classList.add('open'); }));
+$('#menuDevice .menu-pop').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-dev]'); if (!b) return; closeMenus(); setDeviceMode(b.dataset.dev);
+  toast(`Mode tampilan: ${DEVICE_NAMES[b.dataset.dev]}${b.dataset.dev === 'auto' ? ' (' + DEVICE_NAMES[effectiveDevice()] + ')' : ''}`);
+});
+// layout changed (rotation, window resize, chosen mode): panels and canvas follow
+onDeviceChange(() => {
+  if (isNarrow() && !$('#workspace').classList.contains('lp-closed')) { $('#workspace').classList.add('lp-closed'); $$('.rail-btn').forEach((b) => b.classList.remove('on')); }
+  if (isPhone() && !sim.running) $('#console').classList.add('collapsed');
+  requestAnimationFrame(() => { canvas._applyView(); editor._sync?.(); });
+});
+if (isPhone()) $('#console').classList.add('collapsed');
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.menu')) closeMenus(); });
 
 function projectData() { const m = canvas.getModel(); return { v: 2, title: $('#projectTitle').value, code: editor.value, parts: m.parts, connections: m.connections, example: state.exampleId, libs: state.libs }; }
@@ -736,7 +834,6 @@ async function doAction(act) {
     case 'delete': canvas.deleteSelected(); break;
     case 'wire-text': openWireText(); break;
     case 'auto-wire': autoWire(); break;
-    case 'auto-code': autoCode(); break;
     case 'newbie': toggleNewbie(); break;
     case 'auto-bb': {
       stopSim(); const { autoBreadboard } = await import('./ui/autobb.js'); const r = await autoBreadboard(canvas, BY_TAG);
@@ -800,10 +897,13 @@ function openHelp() {
   <h4>Membuat kabel</h4><ul><li>Ketuk pin pertama, lalu ketuk pin tujuan. Atau seret dari pin ke pin.</li><li>Selama kabel belum selesai: geser layar (satu jari / seret area kosong) dan cubit zoom tidak membatalkan kabel; ketuk area kosong untuk menambah belokan; seret kabel ke tepi layar untuk menggeser otomatis. Batal: tombol ✕ Batal, Esc, atau ketuk pin awal lagi.</li><li>Ketuk kabel untuk memilih: seret titik ● untuk memindah belokan, seret + untuk menambah belokan, ketuk ganda ● untuk menghapus. Panel Properti: ganti warna, <b>Rapikan kabel ini</b>, <b>Rapikan semua kabel</b>, hapus.</li><li><b>Ketik</b> (toolbar): sambung kabel dengan teks, satu baris per kabel, mis. <code>esp32:D21 - oled1:SDA kuning</code>, <code>esp32:GND ke bb1:-</code>, <code>bb1:a10 - led1:A</code>.</li></ul>
   <h4>Bundel kabel</h4><ul><li>Menu Edit → <b>Bundel kabel</b> (atau panel Properti kabel): kabel antara dua komponen yang sama disatukan jadi satu jalur rapi, berjajar sejajar, menghindari badan komponen, diikat cable tie. Bundel ikut menyesuaikan saat komponen digeser; <b>Lepas bundel</b> untuk mengurai.</li></ul>
   <h4>Desain PCB</h4><ul><li>Tombol <b>PCB</b>: rangkaian yang sudah benar dijadikan PCB 2 lapis. Breadboard hilang, sambungannya jadi jalur tembaga; modul & board dicolok lewat female header di posisi pin aslinya.</li><li>Seret komponen untuk mengatur posisi, <b>Rute otomatis</b> untuk menarik jalur (clearance 0,2 mm, via otomatis), cek DRC, lalu <b>Unduh Gerber (.zip)</b> — langsung bisa diunggah ke pabrik PCB.</li></ul>
-  <h4>Auto wiring · Auto kode · Newbie</h4><ul><li><b>Auto wiring</b>: semua pin komponen yang belum tersambung diberi pin mikrokontroler yang cocok (VCC sesuai tegangan modul, GND, I²C/SPI/UART bawaan, ADC untuk keluaran analog, PWM bila perlu, GPIO bebas untuk sisanya; LED lewat resistor bila ada), lalu ditancapkan ke breadboard dan dirapikan. Alasan tiap pin ditulis di Log.</li><li><b>Auto kode</b>: membaca komponen terhubung ke pin mana, lalu membuat program lengkap dengan library yang sesuai. Bisa dipakai terpisah dari Auto wiring (misalnya setelah merangkai sendiri).</li><li><b>Newbie</b>: panduan langkah demi langkah. Tahap <i>Rangkai</i> menunjukkan pin mana disambung ke mana beserta alasannya (pin menyala kuning, langkah tercentang sendiri saat kabel dibuat), tahap <i>Kode</i> menyusun program per komponen, tahap <i>Uji</i> mengajarkan cara menguji tiap komponen.</li><li>Contoh proyek otomatis dipasang di breadboard; menu Edit → <b>Pasang di breadboard</b> melakukan hal yang sama untuk rangkaianmu, tanpa mengubah sambungan listriknya. Semua kabel digambar bersiku.</li></ul>
+  <h4>Auto wiring · Auto kode · Newbie</h4><ul><li><b>Auto wiring</b>: semua pin komponen yang belum tersambung diberi pin mikrokontroler yang cocok (VCC sesuai tegangan modul, GND, I²C/SPI/UART bawaan, ADC untuk keluaran analog, PWM bila perlu, GPIO bebas untuk sisanya; LED lewat resistor bila ada), lalu ditancapkan ke breadboard dan dirapikan. Alasan tiap pin ditulis di Log.</li><li><b>Auto kode</b> (di tab <b>Kode</b>): membaca komponen terhubung ke pin mana, lalu membuat program lengkap dengan library yang sesuai. Bisa dipakai terpisah dari Auto wiring (misalnya setelah merangkai sendiri).</li><li><b>Newbie</b>: panduan langkah demi langkah. Tahap <i>Rangkai</i> menunjukkan pin mana disambung ke mana beserta alasannya (pin menyala kuning, langkah tercentang sendiri saat kabel dibuat), tahap <i>Kode</i> menyusun program per komponen, tahap <i>Uji</i> mengajarkan cara menguji tiap komponen.</li><li>Contoh proyek otomatis dipasang di breadboard; menu Edit → <b>Pasang di breadboard</b> melakukan hal yang sama untuk rangkaianmu, tanpa mengubah sambungan listriknya. Semua kabel digambar bersiku.</li></ul>
   <h4>Tampilan 3D</h4><ul><li>Tombol <b>3D</b> di toolbar: rangkaian dalam 3D dan tetap tersimulasi (LED menyala, layar, NeoPixel, servo ikut bergerak).</li><li>Seret: putar · dua jari / klik kanan: geser · cubit / scroll: zoom · tombol Iso/Atas/Depan · keyboard WASD, Q/E, +/−.</li><li>Komponen bisa dioperasikan langsung di 3D: tekan tombol, putar potensio / encoder, gerakkan joystick, geser saklar, ketuk keypad / DIP / remote IR, dan <b>seret sensor naik-turun</b> untuk mengubah nilainya (suhu, jarak, cahaya, gas …). Panel <b>Kontrol</b> pada kartu komponen berisi semua nilai sensor.</li><li><b>Ukur</b> (M): multimeter. Ketuk pin, lubang breadboard, atau ujung kabel untuk memasang probe; tegangan, HIGH/LOW/PWM, mode pin (INPUT/OUTPUT) dan sambungannya tampil langsung. Dua probe menampilkan beda tegangannya.</li><li><b>Diagnosa</b> (G): daftar kesalahan dari cek rangkaian, peringatan simulasi, dan pengukuran daya tiap komponen. Komponen bermasalah diberi kotak merah / kuning; ketuk butir untuk menuju komponennya.</li></ul>
+  <h4>Mobil robot & ESP-NOW</h4><ul><li>Komponen <b>Sasis Mobil Robot 2WD</b> (kategori Robot): sambungkan motornya ke L298N, lalu taruh ESP32, driver, baterai, dan sensor di atas sasis. Menggeser sasis di Desain ikut membawa komponen di atasnya.</li><li>Buka <b>3D</b> lalu <b>Jalankan</b>: mobil berjalan di arena sesuai tegangan motor. Pilih arena (dinding 2×2 m, rintangan, lintasan garis hitam, lantai bebas) di Properti sasis. Tombol <b>Ikuti mobil</b> (K) dan <b>Reset mobil</b> ada di bilah 3D.</li><li>Sensor di atas sasis membaca arena: HC-SR04 / JSN-SR04T / VL53L0X mengukur jarak ke dinding, FC-51 melihat halangan &lt; 15 cm, TCRT5000 mendeteksi garis hitam.</li><li><b>ESP-NOW</b>: <code>#include &lt;esp_now.h&gt;</code> (ESP32) atau <code>&lt;espnow.h&gt;</code> (ESP8266). Tab <b>ESP-NOW</b> di konsol adalah remote virtual: tahan tombol arah (atau W/A/S/D) untuk mengirim huruf perintah, atau pilih format struct joystick. Paket yang dikirim board (<code>esp_now_send</code>) tampil di sana. Callback gaya Arduino-ESP32 2.x dan 3.x sama-sama didukung.</li><li>Contoh siap pakai: grup <b>Robot & ESP-NOW</b> (mobil RC ESP-NOW, robot penghindar halangan, robot pengikut garis).</li></ul>
+  <h4>Benda di sekitar sensor (3D)</h4><ul><li>Sensor jarak menampilkan dinding pada jarak yang diatur; seret dinding maju/mundur untuk mengubah jarak. Sensor ketinggian air memperlihatkan tangki berisi air, sensor tanah memperlihatkan tanah (makin gelap makin basah), sensor hujan memperlihatkan tetesan, LDR lampu, sensor api lilin.</li></ul>
+  <h4>Mode tampilan: Laptop, iPad, HP</h4><ul><li>Tombol layar di kanan atas memilih tata letak. <b>Otomatis</b> menyesuaikan perangkat. Di HP, panel ada di bilah bawah dan konsol bisa diperkecil. Memilih mode yang lebih kecil dari layar menampilkan pratinjau berbingkai (berguna bagi guru untuk melihat tampilan siswa di HP).</li></ul>
   <h4>Kanvas</h4><ul><li>Satu jari di area kosong: geser kanvas. Dua jari: cubit untuk zoom.</li><li>Seret komponen untuk memindah. Saat simulasi berjalan, seret lewat label nama di atasnya.</li><li>Tombol putar, duplikat, hapus, urungkan/ulangi ada di toolbar atas.</li></ul>
-  <h4>Simulasi</h4><ul><li>Desain → Kode → Simulasi. Tekan <b>Jalankan</b>; galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Kode dijalankan untuk Arduino Uno/Nano, ESP32 DevKit, ESP32-CAM, NodeMCU / Wemos D1 mini (ESP8266) dan Raspberry Pi Pico.</li></ul>
+  <h4>Simulasi</h4><ul><li>Rangkai di <b>Desain</b>, tulis program di <b>Kode</b> (tombol <b>Auto kode</b> membuatkan program dari rangkaianmu), lalu tekan <b>Jalankan</b>. Simulasi berjalan langsung di kanvas Desain (2D maupun 3D); galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Kode dijalankan untuk Arduino Uno/Nano/Mega, Franzininho (ATtiny85), ESP32 DevKit, ESP32-CAM, NodeMCU / Wemos D1 mini (ESP8266), Raspberry Pi Pico dan Nano RP2040 Connect.</li></ul>
   <h4>ESP32: WiFi, internet, Bluetooth, kamera</h4><ul><li><b>WiFi</b> tersimulasi: <code>WiFi.begin()</code> tersambung ±1 detik (nama/password bebas, mis. "Wokwi-GUEST"), IP 10.10.0.2.</li><li><b>Internet nyata</b>: <code>HTTPClient</code> (GET/POST, http/https) memakai koneksi iPad/laptop ini; layanan tanpa izin CORS otomatis lewat proxy simulator.</li><li><b>Blynk, Telegram, MQTT, ThingSpeak</b>: <code>WiFiClient</code> / <code>WiFiClientSecure</code> / <code>WiFiUDP</code> tersambung sungguhan lewat <b>gateway IoT</b> server kompilasi (seperti Wokwi), jadi library asli (BlynkSimpleEsp32, UniversalTelegramBot, PubSubClient…) dan API key asli langsung bisa dipakai.</li><li><b>Library</b>: <code>#include</code> library dari Arduino Library Manager diunduh otomatis. Library .zip (mis. Edge Impulse) ditambahkan di panel <b>Library</b>.</li><li><b>Bluetooth</b>: <code>BluetoothSerial</code> tersambung ke tab <b>Bluetooth</b> di konsol (seperti aplikasi Serial Bluetooth Terminal di HP).</li><li><b>ESP32-CAM</b>: <code>esp_camera_fb_get()</code> mengambil foto JPEG dari tab <b>Kamera</b>: kamera iPad/laptop, foto unggahan, atau gambar contoh.</li><li>Seperti ESP32 asli: ADC2 (GPIO 0, 2, 4, 12–15, 25–27) tidak bisa dibaca saat WiFi aktif — pakai GPIO 32–39. GPIO 34–39 hanya input. Logika 3,3 V.</li><li><b>Edge Impulse</b>: unggah ekspor "Arduino library" di panel Library; ESP32-CAM memakai gambar dari tab Kamera (<code>fmt2rgb888</code> didukung).</li><li>Belum didukung: WebServer / server di dalam ESP32 (gateway hanya koneksi keluar), Bluetooth BLE, FreeRTOS task. Waktu CPU diperkirakan, bukan akurat per siklus.</li></ul>`;
   $('#dlgHelp').showModal();
 }
@@ -881,7 +981,7 @@ async function toggle3D(force) {
         if (key === 'common') canvas._refreshPins(part);
         if (commit) canvas.snapshot();
         if (state.panel === 'props' && canvas.selected?.id === part.id) renderProps(true);
-      } }); view3d.onToggle = (on) => { btn.classList.toggle('on', on); document.body.classList.toggle('mode-3d', on); }; }
+      } }); view3d.onToggle = (on) => { btn.classList.toggle('on', on); document.body.classList.toggle('mode-3d', on); if (on && isPhone()) { $('#console').classList.add('collapsed'); requestAnimationFrame(() => window.dispatchEvent(new Event('resize'))); } }; }
     catch (e) { toast('Tampilan 3D gagal dimuat: ' + e.message, true); return; }
     finally { btn.disabled = false; }
   }
@@ -955,6 +1055,6 @@ async function toggleNewbie(force) {
   guide.toggle(force);
 }
 $('#tbAutoWire').onclick = () => autoWire();
-$('#tbAutoCode').onclick = () => autoCode();
+$('#btnAutoCode').onclick = () => autoCode();
 $('#tbNewbie').onclick = () => toggleNewbie();
 window.__learn = { autoWire, autoCode, toggleNewbie, get guide() { return guide; } };   // handle for automated tests

@@ -7,7 +7,7 @@ import { MODULE_SPECS } from './parts/modules.js';
 const colors = ['red', 'green', 'blue', 'yellow', 'white', 'orange', 'purple', 'cyan'];
 const slider = (key, label, min, max, step, def, unit = '') => ({ key, label, type: 'range', min, max, step, def, unit });
 
-export const CATEGORIES = ['Mikrokontroler', 'Breadboard', 'Sensor', 'Input', 'Tampilan', 'Output', 'Aktuator', 'Drone', 'Komunikasi', 'Daya', 'Pasif & Dasar'];
+export const CATEGORIES = ['Mikrokontroler', 'Breadboard', 'Sensor', 'Input', 'Tampilan', 'Output', 'Aktuator', 'Drone', 'Robot', 'Komunikasi', 'Daya', 'Pasif & Dasar'];
 
 const ESP32_DEVKIT_GPIO = {
   D13: 13, D12: 12, D14: 14, D27: 27, D26: 26, D25: 25, D33: 33, D32: 32, D35: 35, D34: 34, VN: 39, VP: 36,
@@ -105,7 +105,7 @@ const WOKWI = [
 ];
 
 const MODULES = MODULE_SPECS.map((s) => ({ tag: s.tag, name: s.name, cat: s.cat, sim: s.sim, board: s.board, mcu: s.mcu, keywords: s.keywords || '', runtime: s.runtime, wasm: s.wasm,
-  props: s.props, gpio: s.gpio, power: s.power, outs: s.outs, logic: s.logic, module: true }));
+  props: s.props, gpio: s.gpio, power: s.power, outs: s.outs, logic: s.logic, underlay: s.underlay, module: true }));
 
 export const CATALOG = [...WOKWI, ...MODULES];
 export const BY_TAG = Object.fromEntries(CATALOG.map((c) => [c.tag, c]));

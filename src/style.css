@@ -82,15 +82,12 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line-2);
 #partList { flex: 1; padding: 6px 10px 16px; }
 .cat { margin: 12px 2px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); font-weight: 700; }
 .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 4px 7px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-height: 104px; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px 7px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-height: 96px; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .card:hover { border-color: var(--accent); box-shadow: 0 2px 8px #3f51b51f; }
 .card:active { transform: scale(.97); }
 .card .thumb { width: 74px; height: 58px; display: grid; place-items: center; overflow: hidden; pointer-events: none; }
 .card .thumb > * { flex: none; }
 .card .nm { font-size: 11.5px; line-height: 1.2; text-align: center; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.card .tag { position: absolute; top: 4px; right: 4px; font-size: 8.5px; font-weight: 700; padding: 1px 4px; border-radius: 4px; letter-spacing: .3px; }
-.tag.sim { background: #e3f6ea; color: #17803f; } .tag.design { background: #fff3db; color: #9a6400; } .tag.visual { background: #eceff3; color: #6b7385; }
-:root[data-theme="dark"] .tag.sim { background: #163323; color: #6ee7a0; } :root[data-theme="dark"] .tag.design { background: #3a2c10; color: #f6c86b; } :root[data-theme="dark"] .tag.visual { background: #252b36; color: #9aa4b5; }
 #examplesList { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .ex { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .ex:hover { border-color: var(--accent); }
@@ -107,7 +104,6 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line-2);
 #center { grid-column: 3; grid-row: 1; display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; position: relative; }
 #stage, #codeView, #buildView { grid-row: 1; min-height: 0; min-width: 0; }
 #workspace[data-mode="design"] #codeView, #workspace[data-mode="design"] #buildView,
-#workspace[data-mode="simulate"] #codeView, #workspace[data-mode="simulate"] #buildView,
 #workspace[data-mode="code"] #stage, #workspace[data-mode="code"] #buildView,
 #workspace[data-mode="build"] #stage, #workspace[data-mode="build"] #codeView { display: none; }
 #workspace[data-mode="code"], #workspace[data-mode="build"] { grid-template-columns: 68px 0 minmax(0, 1fr); }
@@ -288,40 +284,37 @@ dialog label input { width: 100%; margin-top: 4px; background: var(--panel-2); b
 #dragGhost { position: fixed; z-index: 200; pointer-events: none; padding: 6px 10px; background: var(--accent); color: #fff; border-radius: 8px; font-weight: 600; font-size: 12px; transform: translate(-50%, -130%); box-shadow: var(--shadow); }
 
 /* ------------------------------------------------ touch devices (iPad) */
-@media (pointer: coarse) {
-  :root { --tb: 44px; }
-  .pin { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-width: 1.5px; }
-  .part .grip { opacity: .9; height: 22px; line-height: 22px; top: -24px; font-size: 11px; padding: 0 8px; }
-  .menu-pop button { padding: 12px 10px; }
-  .mode { padding: 8px 18px; min-height: 40px; }
-  .rail-btn { padding: 11px 2px 9px; }
-}
+:root:is([data-device="tablet"], [data-device="phone"]) { --tb: 44px; }
+:root:is([data-device="tablet"], [data-device="phone"]) .pin { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-width: 1.5px; }
+:root:is([data-device="tablet"], [data-device="phone"]) .part .grip { opacity: .9; height: 22px; line-height: 22px; top: -24px; font-size: 11px; padding: 0 8px; }
+:root:is([data-device="tablet"], [data-device="phone"]) .menu-pop button { padding: 12px 10px; }
+:root:is([data-device="tablet"], [data-device="phone"]) .mode { padding: 8px 18px; min-height: 40px; }
+:root:is([data-device="tablet"], [data-device="phone"]) .rail-btn { padding: 11px 2px 9px; }
+:root:is([data-device="tablet"], [data-device="phone"]) .mb { padding: 4px 9px; }
 
 /* ------------------------------------------------ responsive: iPad portrait / small laptops */
-@media (max-width: 1100px) {
-  #workspace { grid-template-columns: 64px 0 minmax(0, 1fr); }
-  #leftPanel { position: absolute; left: 64px; top: 0; bottom: 0; width: min(340px, calc(100vw - 80px)); box-shadow: var(--shadow); }
-  #workspace.lp-closed #leftPanel { display: none; }
-  .lp-close { display: inline-grid; }
-  .lp-head { padding-right: 48px; }
-  #workspace[data-mode="code"] #leftPanel, #workspace[data-mode="build"] #leftPanel { display: none; }
-}
-@media (max-width: 860px) {
-  #topbar { grid-template-columns: minmax(0, 1fr) auto; height: auto; padding: 8px 10px; row-gap: 6px; }
-  .modes { grid-row: 2; grid-column: 1 / -1; justify-self: stretch; } .mode { flex: 1; }
-  .actions .btn span { display: none; }
-  .title-input { width: 100%; }
-  .tb.run span { display: none; }
-  #console { height: 170px; }
-}
-@media (max-width: 600px) {
-  .sel-tools { display: none; }
-}
+/* the width classes follow the app width (see ui/device.js), so they also work inside the preview frame */
+:root:is([data-w="m"], [data-w="s"], [data-w="xs"]) #workspace { grid-template-columns: 64px 0 minmax(0, 1fr); }
+:root:is([data-w="m"], [data-w="s"], [data-w="xs"]) #leftPanel { position: absolute; left: 64px; top: 0; bottom: 0; width: min(340px, calc(100% - 80px)); box-shadow: var(--shadow); }
+:root:is([data-w="m"], [data-w="s"], [data-w="xs"]) #workspace.lp-closed #leftPanel { display: none; }
+:root:is([data-w="m"], [data-w="s"], [data-w="xs"]) .lp-close { display: inline-grid; }
+:root:is([data-w="m"], [data-w="s"], [data-w="xs"]) .lp-head { padding-right: 48px; }
+:root:is([data-w="m"], [data-w="s"], [data-w="xs"]) #workspace:is([data-mode="code"], [data-mode="build"]) #leftPanel { display: none; }
+:root:is([data-w="s"], [data-w="xs"]) #topbar { grid-template-columns: minmax(0, 1fr) auto; height: auto; padding: 8px 10px; row-gap: 6px; }
+:root:is([data-w="s"], [data-w="xs"]) .modes { grid-row: 2; grid-column: 1 / -1; justify-self: stretch; }
+:root:is([data-w="s"], [data-w="xs"]) .mode { flex: 1; }
+:root:is([data-w="s"], [data-w="xs"]) .actions .btn span { display: none; }
+:root:is([data-w="s"], [data-w="xs"]) .title-input { width: 100%; }
+:root:is([data-w="s"], [data-w="xs"]) .tb.run span { display: none; }
+:root:is([data-w="s"], [data-w="xs"]) #console:not(.tall):not(.collapsed) { height: 170px; }
+:root:is([data-w="s"], [data-w="xs"]) .code-actions .btn span { display: none; }
+:root:is([data-w="s"], [data-w="xs"]) .code-actions .btn.primary span { display: inline; }
+:root[data-w="xs"] .sel-tools { display: none; }
 
 /* ---- Bluetooth terminal + ESP32-CAM panes */
 #btPane, #camPane, #ftdiPane { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 #btPane[hidden], #camPane[hidden], #ftdiPane[hidden] { display: none; }
-#console.tall { height: 380px; }
+#console.tall:not(.collapsed) { height: 380px; }
 #dronePane { display: flex; flex: 1; min-height: 0; outline: none; }
 #dronePane[hidden] { display: none; }
 .drone-view { position: relative; flex: 1; min-width: 0; }
@@ -337,7 +330,11 @@ dialog label input { width: 100%; margin-top: 4px; background: var(--panel-2); b
 .stick .lbl { position: absolute; left: 0; right: 0; top: 3px; text-align: center; font-size: 10px; color: var(--muted); }
 .tx-sw { margin-top: 14px; } .sw { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .tx-help { text-align: center; }
-@media (max-width: 760px) { #console.tall { height: 470px; } #dronePane { flex-direction: column; } .drone-view { min-height: 220px; } .drone-tx { width: auto; border-left: 0; border-top: 1px solid var(--line); } .stick { width: 112px; height: 112px; } }
+:root:is([data-w="s"], [data-w="xs"]) #console.tall:not(.collapsed) { height: min(470px, 62vh); }
+:root:is([data-w="s"], [data-w="xs"]) #dronePane { flex-direction: column; overflow: auto; }
+:root:is([data-w="s"], [data-w="xs"]) .drone-view { min-height: 200px; }
+:root:is([data-w="s"], [data-w="xs"]) .drone-tx { width: auto; border-left: 0; border-top: 1px solid var(--line); }
+:root:is([data-w="s"], [data-w="xs"]) .stick { width: 112px; height: 112px; }
 #ftdiOut { flex: 1; margin: 0; padding: 8px 10px; font: 12px/1.45 var(--mono, ui-monospace, monospace); white-space: pre-wrap; overflow: auto; min-height: 0; }
 #ftdiOut .me { color: #2f7cf6; }
 #ftdiForm { display: flex; gap: 6px; padding: 6px; border-top: 1px solid var(--line); }
@@ -375,7 +372,7 @@ dialog label input { width: 100%; margin-top: 4px; background: var(--panel-2); b
 .bb-mode .tb span { font-size: 13px; }
 #viewport.bb-move .pinbox.bb .pin { cursor: move; }
 #viewport.bb-move .pinbox.bb .pin:hover { background: transparent; border-color: transparent; }
-@media (max-width: 900px) { .bb-mode .bb-mode-l { display: none; } }
+:root:is([data-w="m"], [data-w="s"], [data-w="xs"]) .bb-mode .bb-mode-l { display: none; }
 
 dialog.wide { width: min(720px, 96vw); }
 #wtText { width: 100%; box-sizing: border-box; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); resize: vertical; }
@@ -468,9 +465,10 @@ dialog.wide { width: min(720px, 96vw); }
 :root[data-theme="dark"] .v3-label small { color: #aab2c0; }
 :root[data-theme="dark"] .v3-iss.error { background: #3a1d1d; color: #ffb4ab; } :root[data-theme="dark"] .v3-iss.warn { background: #3a2f17; color: #ffd27a; }
 :root[data-theme="dark"] .v3-ok { background: #183526; color: #8fe0ae; }
-@media (max-width: 760px) { .v3-side { top: 100px; max-height: 34%; } .v3-info { max-height: 38%; } }
+:root:is([data-w="s"], [data-w="xs"]) .v3-side { top: 64px; max-height: 34%; }
 body.mode-3d #toolbar .tb-group:not(.run-group):not(.v3-keep) { display: none; }
-@media (max-width: 760px) { .v3-help { display: none; } .v3-info { top: auto; bottom: 104px; max-height: 45%; } }
+:root:is([data-w="s"], [data-w="xs"]) .v3-help { display: none; }
+:root:is([data-w="s"], [data-w="xs"]) .v3-info { top: auto; left: 8px; right: 8px; width: auto; bottom: 100px; max-height: 42%; }
 .v3-help { transition: opacity .6s; } .v3-help.fade { opacity: 0; }
 
 /* ---------- pin table (Sambung kabel) */
@@ -536,7 +534,7 @@ dialog.pm-dlg form { max-height: 90vh; display: flex; flex-direction: column; }
 .pcb-close { position: absolute; left: 12px; top: 64px; }
 #tbPcb.on { color: var(--accent); background: #3f51b51a; }
 body.mode-pcb #toolbar .tb-group:not(.run-group):not(.v3-keep) { display: none; }
-@media (max-width: 760px) { .pcb-side { top: auto; bottom: 56px; left: 12px; width: auto; max-height: 42%; } }
+:root:is([data-w="s"], [data-w="xs"]) .pcb-side { top: auto; bottom: 56px; left: 12px; width: auto; max-height: 42%; }
 
 /* Auto kode dialog */
 .ac-code { max-height: 52vh; overflow: auto; background: #0f172a; color: #e2e8f0; border-radius: 10px; padding: 12px 14px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre; margin: 8px 0; }
@@ -573,5 +571,142 @@ body.mode-pcb #toolbar .tb-group:not(.run-group):not(.v3-keep) { display: none; 
 .pin.guide-hl { z-index: 5; background: #ffd400 !important; box-shadow: 0 0 0 3px #ffd40099, 0 0 14px 4px #ffd400aa; animation: gdpulse 1s ease-in-out infinite; }
 @keyframes gdpulse { 50% { box-shadow: 0 0 0 6px #ffd40044, 0 0 22px 8px #ffd40066; } }
 :root[data-theme="dark"] .gd-iss.error { background: #3a1d1d; color: #ffb4ab; } :root[data-theme="dark"] .gd-iss.warn { background: #3a2f17; color: #ffd27a; }
-@media (max-width: 760px) { .guide { right: 8px; left: 8px; width: auto; bottom: 8px; max-height: 55vh; } .learn-group .tb span { display: none; } }
+:root:is([data-w="s"], [data-w="xs"]) .guide { right: 8px; left: 8px; width: auto; bottom: 8px; max-height: 55vh; }
+:root:is([data-w="m"], [data-w="s"], [data-w="xs"]) .learn-group .tb span { display: none; }
 @media (max-width: 1400px) { .learn-group .tb span { display: none; } .learn-group .tb { padding: 0 8px; } }
+
+/* ================================================================ layout modes: Laptop / iPad / HP (ui/device.js) */
+.menu-pop.menu-right { left: auto; right: 0; top: 44px; min-width: 230px; }
+.menu-pop .menu-cap { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 6px 10px 4px; }
+.menu-pop button svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.menu-pop button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.menu-pop button.on svg { color: var(--accent); }
+.menu-pop button .small { margin-left: auto; }
+#btnDevice { color: var(--text); }
+
+/* a layout chosen by hand that is narrower than the window: the app in a centred device frame */
+:root.framed body { background: #b9c0cc; }
+:root.framed[data-theme="dark"] body { background: #07090d; }
+:root.framed #app { width: var(--frame-w); max-width: 100%; margin: 0 auto; background: var(--bg); box-shadow: 0 0 0 1px #0003, 0 10px 50px #0004; position: relative; }
+:root.framed .guide { right: max(8px, calc((100vw - var(--frame-w)) / 2 + 8px)); }
+:root.framed[data-device="phone"] dialog { width: min(420px, 94vw); }
+
+/* ---------------------------------------------------------------- HP (phone) */
+:root[data-device="phone"] #topbar { grid-template-columns: minmax(0, 1fr) auto; height: auto; padding: 6px 8px; gap: 6px 8px; }
+:root[data-device="phone"] .brand > svg { width: 26px; height: 26px; flex: none; }
+:root[data-device="phone"] .brand { gap: 8px; }
+:root[data-device="phone"] .title-input { font-size: 15px; width: 100%; }
+:root[data-device="phone"] .menubar { gap: 0; }
+:root[data-device="phone"] .actions { gap: 2px; }
+:root[data-device="phone"] .actions .icon-btn { width: 40px; height: 40px; }
+:root[data-device="phone"] #btnShare { padding: 0 11px; }
+:root[data-device="phone"] #btnShare span { display: none; }
+:root[data-device="phone"] .modes { grid-row: 2; grid-column: 1 / -1; justify-self: stretch; }
+:root[data-device="phone"] .mode { flex: 1; padding: 6px 8px; min-height: 38px; }
+
+/* the panel rail becomes a bottom navigation bar, panels open as full-width sheets above it */
+:root[data-device="phone"] #workspace,
+:root[data-device="phone"] #workspace.lp-closed,
+:root[data-device="phone"] #workspace:is([data-mode="code"], [data-mode="build"]) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+:root[data-device="phone"] #rail { grid-column: 1; grid-row: 2; flex-direction: row; justify-content: space-around; gap: 2px; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); border-right: 0; border-top: 1px solid var(--line); overflow: visible; z-index: 30; }
+:root[data-device="phone"] .rail-btn { flex: 1; min-width: 0; padding: 6px 2px 5px; font-size: 10.5px; gap: 2px; }
+:root[data-device="phone"] .rail-btn svg { width: 21px; height: 21px; }
+:root[data-device="phone"] .rail-badge { right: calc(50% - 18px); top: 3px; }
+:root[data-device="phone"] #center { grid-column: 1; grid-row: 1; }
+:root[data-device="phone"] #leftPanel { grid-column: 1; grid-row: 1; position: relative; left: auto; top: auto; bottom: auto; width: auto; z-index: 25; border-right: 0; box-shadow: none; }
+:root[data-device="phone"] .lp-close { display: inline-grid; }
+:root[data-device="phone"] .lp-head { padding-right: 48px; }
+:root[data-device="phone"] .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+
+/* canvas toolbar: one scrolling row, icons only */
+:root[data-device="phone"] #toolbar { top: 6px; left: 6px; right: 6px; flex-wrap: nowrap; justify-content: flex-start; gap: 6px; overflow-x: auto; scrollbar-width: none; pointer-events: auto; touch-action: pan-x; padding-bottom: 2px; }
+:root[data-device="phone"] #toolbar::-webkit-scrollbar { display: none; }
+:root[data-device="phone"] .tb-group { flex: none; }
+:root[data-device="phone"] .run-group { margin-right: 0; }
+:root[data-device="phone"] #toolbar .tb span { display: none; }
+:root[data-device="phone"] .tb.run { padding: 0 12px; }
+:root[data-device="phone"] #zoomIn, :root[data-device="phone"] #zoomOut, :root[data-device="phone"] #zoomLabel, :root[data-device="phone"] #tbGrid { display: none; }
+:root[data-device="phone"] .bb-mode .bb-mode-l { display: none; }
+:root[data-device="phone"] #wireHint { top: 58px; font-size: 12px; padding-left: 12px; }
+:root[data-device="phone"] #wireHint span { white-space: normal; line-height: 1.25; }
+:root[data-device="phone"] #simStatus { left: 6px; bottom: 6px; padding: 4px 10px; font-size: 12px; max-width: calc(100% - 12px); }
+:root[data-device="phone"][data-w="xs"] #boardInfo { display: none; }
+
+/* console: a drawer that stays collapsed until needed */
+:root[data-device="phone"] #console:not(.collapsed) { height: 40vh; min-height: 170px; }
+:root[data-device="phone"] #console.tall:not(.collapsed) { height: 66vh; }
+:root[data-device="phone"] .pane-head { overflow-x: auto; scrollbar-width: none; gap: 0; padding: 0 4px; }
+:root[data-device="phone"] .pane-head::-webkit-scrollbar { display: none; }
+:root[data-device="phone"] .tab { padding: 0 9px; flex: none; }
+:root[data-device="phone"] #logClear { flex: none; }
+:root[data-device="phone"] #serialForm, :root[data-device="phone"] #btForm, :root[data-device="phone"] #ftdiForm { flex-wrap: wrap; }
+:root[data-device="phone"] #serialForm input, :root[data-device="phone"] #btForm input, :root[data-device="phone"] #ftdiForm input { flex: 1 1 100%; min-height: 40px; font-size: 16px; }
+:root[data-device="phone"] .cam-views { grid-template-columns: 1fr; }
+
+/* code view */
+:root[data-device="phone"] .code-head { padding: 6px 8px; flex-wrap: wrap; }
+:root[data-device="phone"] .code-actions { gap: 6px; }
+:root[data-device="phone"] .code-actions .btn { padding: 0 11px; min-height: 40px; }
+:root[data-device="phone"] .code-actions .btn span { display: none; }
+:root[data-device="phone"] .code-actions .btn.primary span, :root[data-device="phone"] #btnAutoCode span { display: inline; }
+:root[data-device="phone"] #gutter { width: 38px; }
+:root[data-device="phone"] #buildView { padding: 10px; }
+:root[data-device="phone"] .build-actions .btn { flex: 1 1 calc(50% - 8px); }
+
+/* floating pieces stay above the bottom bar */
+:root[data-device="phone"] #toast { bottom: calc(78px + env(safe-area-inset-bottom)); }
+:root[data-device="phone"] .guide { left: 6px; right: 6px; width: auto; bottom: calc(66px + env(safe-area-inset-bottom)); max-height: 58%; }
+:root[data-device="phone"] dialog { width: calc(100vw - 16px); max-width: none; border-radius: 12px; }
+:root[data-device="phone"] dialog form { padding: 14px; max-height: calc(100dvh - 40px); }
+:root[data-device="phone"] dialog menu { flex-wrap: wrap; }
+:root[data-device="phone"] dialog menu .btn { flex: 1 1 auto; min-height: 42px; }
+:root[data-device="phone"] .search input, :root[data-device="phone"] .prop-row input[type="text"], :root[data-device="phone"] .prop-row select, :root[data-device="phone"] dialog input, :root[data-device="phone"] #wtText { font-size: 16px; }
+:root[data-device="phone"] .prop-row { grid-template-columns: 104px 1fr; }
+
+/* 3D, PCB and drone views */
+:root[data-device="phone"] .v3-tools { bottom: 48px; left: 6px; right: 6px; transform: none; max-width: none; justify-content: flex-start; scrollbar-width: none; }
+:root[data-device="phone"] .v3-tools button { min-width: 40px; height: 40px; flex: none; }
+:root[data-device="phone"] .v3-help { display: none; }
+:root[data-device="phone"] .v3-info { left: 6px; right: 6px; width: auto; top: auto; bottom: 102px; max-height: 46%; }
+:root[data-device="phone"] .v3-side { left: 6px; right: 6px; width: auto; top: 58px; max-height: 32%; }
+:root[data-device="phone"] .pcb-side { left: 6px; right: 6px; width: auto; top: auto; bottom: 52px; max-height: 44%; }
+:root[data-device="phone"] .pcb-close { top: 58px; left: 6px; }
+:root[data-device="phone"] .drone-tx { padding: 6px; }
+
+/* iPad: a little more room for fingers */
+:root[data-device="tablet"] .tb-group { padding: 4px; }
+:root[data-device="tablet"] .card { min-height: 104px; }
+:root[data-device="tablet"] .search input, :root[data-device="tablet"] dialog input, :root[data-device="tablet"] #serialIn { font-size: 16px; }
+
+/* 3D scenery labels (distance to the obstacle, water level …) and robot car buttons */
+.v3-slabel { position: absolute; left: 0; top: 0; pointer-events: none; background: #0f172ae0; color: #fff; border-radius: 6px; padding: 1px 7px; font: 700 11.5px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: nowrap; box-shadow: 0 1px 4px #0004; }
+.v3-slabel.water { background: #1565c0e6; }
+.v3-tools [hidden] { display: none; }
+
+/* ESP-NOW tab: virtual remote board */
+#nowPane { display: flex; flex-direction: column; flex: 1; min-height: 0; outline: none; }
+#nowPane[hidden] { display: none; }
+.now-body { flex: 1; min-height: 0; display: flex; }
+.now-ctl { width: 300px; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border-right: 1px solid var(--line); overflow: auto; }
+.now-fmt, .now-map { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.now-fmt select, .now-map input, #nowForm input { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 8px; min-height: 34px; color: var(--text); font: inherit; }
+.now-map input { font-family: var(--mono); letter-spacing: .1em; }
+.now-pad { display: grid; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 46px); gap: 5px; justify-content: center; touch-action: none; user-select: none; -webkit-user-select: none; }
+.now-pad button { border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel-2); font-size: 18px; color: var(--text); touch-action: none; }
+.now-pad button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.now-pad .up { grid-area: 1 / 2; } .now-pad .lf { grid-area: 2 / 1; } .now-pad .st { grid-area: 2 / 2; color: var(--danger); } .now-pad .rt { grid-area: 2 / 3; } .now-pad .dn { grid-area: 3 / 2; }
+.now-joy { display: flex; align-items: center; justify-content: center; gap: 14px; padding-bottom: 14px; }
+.now-joy[hidden] { display: none; }
+#nowForm { display: flex; gap: 6px; }
+#nowForm input { flex: 1; min-width: 0; }
+#nowOut { flex: 1; margin: 0; padding: 8px 10px; font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-all; overflow: auto; min-height: 0; }
+#nowOut .me { color: #2f7cf6; } #nowOut .rx { color: var(--text); } #nowOut .sys { color: var(--muted); }
+:root[data-w="xs"] .now-body, :root[data-device="phone"] .now-body { flex-direction: column; overflow: auto; }
+:root[data-w="xs"] .now-ctl, :root[data-device="phone"] .now-ctl { width: auto; border-right: 0; border-bottom: 1px solid var(--line); overflow: visible; }
+:root[data-w="xs"] #nowOut, :root[data-device="phone"] #nowOut { min-height: 120px; }
+:root[data-device="phone"] .now-fmt select, :root[data-device="phone"] .now-map input, :root[data-device="phone"] #nowForm input { font-size: 16px; }
+:root[data-device="phone"] .v3-tools .v3-close { order: -1; }
+:root[data-device="phone"] .v3-tools { display: flex; }
+
+#console.mid:not(.collapsed) { height: 310px; }
+:root[data-device="phone"] #console.mid:not(.collapsed) { height: 58vh; }

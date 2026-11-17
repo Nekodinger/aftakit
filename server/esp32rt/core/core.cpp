@@ -39,8 +39,10 @@ static void run_timers() {
   g_in_timers = false;
 }
 
+extern "C" void __sim_espnow_poll(void);       // shim/esp_now.cpp: received ESP-NOW packets -> callbacks
 void __sim_run_irqs() {
   run_timers();
+  __sim_espnow_poll();
   int pairs[32];
   int n = h_irq_poll(pairs, 16);
   for (int i = 0; i < n; i++) {
