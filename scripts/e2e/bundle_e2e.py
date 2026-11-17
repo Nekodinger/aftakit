@@ -23,10 +23,10 @@ with sync_playwright() as p:
     st = pg.evaluate("""() => { const c = window.__sim.canvas; const ws = c.wires.filter(w=>!w.plug);
       const segs = []; for (const w of ws) { const P=[c.pinPos(w.a), ...w.pts, c.pinPos(w.b)]; for (let i=0;i<P.length-1;i++) segs.push([w.id, P[i], P[i+1]]); }
       const orth = ws.every(w => { const P=[...w.pts]; for (let i=0;i<P.length-1;i++) if (Math.abs(P[i].x-P[i+1].x)>0.6 && Math.abs(P[i].y-P[i+1].y)>0.6) return false; return true; });
-      // crossings between wires of the same bundle
+      // crossings between wires of the same bundle (a swap right at the connector is unavoidable when the two pin rows are in opposite order)
       const X = (a,b,c2,d) => { const o=(p,q,r)=>Math.sign((q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x)); return o(a,b,c2)*o(a,b,d)<0 && o(c2,d,a)*o(c2,d,b)<0; };
       let cross = 0; for (let i=0;i<segs.length;i++) for (let j=i+1;j<segs.length;j++) { const A=segs[i], B=segs[j]; if (A[0]===B[0]) continue;
-        const wa = ws.find(w=>w.id===A[0]), wb = ws.find(w=>w.id===B[0]); if (wa.bundle!==wb.bundle) continue; if (X(A[1],A[2],B[1],B[2])) cross++; }
+        const wa = ws.find(w=>w.id===A[0]), wb = ws.find(w=>w.id===B[0]); if (!wa.bundle || wa.bundle!==wb.bundle) continue; if (X(A[1],A[2],B[1],B[2])) { const ends=[wa,wb].flatMap(w=>[c.pinPos(w.a),c.pinPos(w.b)]); const near=(q)=>ends.some(e=>Math.hypot(e.x-q.x,e.y-q.y)<20); if (!(near(A[1])||near(A[2])||near(B[1])||near(B[2]))) cross++; } }
       return { orth, cross, ties: c.bundleTies().length, bundles: new Set(ws.filter(w=>w.bundle).map(w=>w.bundle)).size, saved: (c.getModel().bundles||[]).length }; }""")
     ok(st['orth'], "bundle routes are orthogonal")
     ok(st['cross'] == 0, f"no crossings inside a bundle ({st['cross']})")

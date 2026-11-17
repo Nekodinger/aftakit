@@ -302,7 +302,7 @@ export class CircuitCanvas {
   }
   /** polyline through bend points with small rounded corners */
   _poly(points) {
-    const r = 6; let d = `M${points[0].x},${points[0].y}`;
+    const r = 3; let d = `M${points[0].x},${points[0].y}`;
     for (let i = 1; i < points.length - 1; i++) {
       const p = points[i - 1], c = points[i], n = points[i + 1];
       const l1 = Math.hypot(c.x - p.x, c.y - p.y) || 1, l2 = Math.hypot(n.x - c.x, n.y - c.y) || 1, k1 = Math.min(r, l1 / 2) / l1, k2 = Math.min(r, l2 / 2) / l2;
@@ -310,7 +310,17 @@ export class CircuitCanvas {
     }
     const e = points[points.length - 1]; return d + ` L${e.x},${e.y}`;
   }
-  _wireD(pa, pb, pts) { return pts?.length ? this._poly([pa, ...pts, pb]) : this._curve(pa, pb); }
+  /** every wire is drawn with right-angle runs: its own bend points, or an automatic orthogonal route */
+  _wireD(pa, pb, pts) {
+    if (pts?.length) return this._poly([pa, ...pts, pb]);
+    if (pa.part && pb.part) return this._poly([pa, ...this._orthoPts(pa, pb), pb]);
+    return this._poly(Math.abs(pa.x - pb.x) < 0.5 || Math.abs(pa.y - pb.y) < 0.5 ? [pa, pb] : [pa, { x: pb.x, y: pa.y }, pb]);   // wire being drawn
+  }
+  /** corner points the wire is drawn through (stored bends, or the automatic orthogonal route) */
+  wirePoints(w) {
+    if (w.pts?.length) return w.pts;
+    const pa = this.pinPos(w.a), pb = this.pinPos(w.b); return pa && pb ? this._orthoPts(pa, pb) : [];
+  }
   _drawWire(w) {
     if (w.plug) return;
     const pa = this.pinPos(w.a), pb = this.pinPos(w.b); if (!pa || !pb) return;
@@ -358,12 +368,25 @@ export class CircuitCanvas {
     if (spine.length === 2 && spine[0].x !== spine[1].x && spine[0].y !== spine[1].y) spine = [S, { x: T.x, y: S.y }, T];
     const n = ends.length, dx = Math.sign(spine[1].x - spine[0].x), dy = Math.sign(spine[1].y - spine[0].y), nl = { x: dy, y: -dx };
     ends.sort((a, b) => (a.p1.x * nl.x + a.p1.y * nl.y) - (b.p1.x * nl.x + b.p1.y * nl.y));
-    ends.forEach((e, r) => {
+    const layout = (order) => order.map((e, r) => {
       const lane = offsetPolyline(spine, (r - (n - 1) / 2) * sp);
       const h0 = Math.abs(lane[1].y - lane[0].y) < 0.01, e0 = lane.length - 1, h1 = Math.abs(lane[e0].y - lane[e0 - 1].y) < 0.01;
       const c1 = h0 ? { x: lane[0].x, y: e.p1.y } : { x: e.p1.x, y: lane[0].y };
       const c2 = h1 ? { x: lane[e0].x, y: e.p2.y } : { x: e.p2.x, y: lane[e0].y };
-      e.w.pts = simplify(orthogonalize([e.pa, e.p1, c1, ...lane, c2, e.p2, e.pb])).slice(1, -1);
+      return simplify(orthogonalize([e.pa, e.p1, c1, ...lane, c2, e.p2, e.pb]));
+    });
+    const crossings = (paths) => {
+      const X = (a, b, c, d) => { const o = (p, q, r) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)); return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0; };
+      let k = 0;
+      for (let i = 0; i < paths.length; i++) for (let j = i + 1; j < paths.length; j++)
+        for (let u = 0; u < paths[i].length - 1; u++) for (let v = 0; v < paths[j].length - 1; v++) if (X(paths[i][u], paths[i][u + 1], paths[j][v], paths[j][v + 1])) k++;
+      return k;
+    };
+    // lanes ordered by the start side; the far end may prefer the reverse order: keep whichever crosses less
+    let order = ends, paths = layout(order);
+    if (n > 1) { const rev = [...ends].reverse(), pr = layout(rev); if (crossings(pr) < crossings(paths)) { order = rev; paths = pr; } }
+    order.forEach((e, r) => {
+      e.w.pts = paths[r].slice(1, -1);
       if (e.ra !== e.w.a) e.w.pts.reverse();
       e.w.bundle = id; this._drawWire(e.w);
     });
@@ -427,7 +450,7 @@ export class CircuitCanvas {
   _drawHandles(w) {
     const g = this.handlesSvg; g.replaceChildren();
     const pa = this.pinPos(w.a), pb = this.pinPos(w.b); if (!pa || !pb || w.plug) return;
-    const pts = [pa, ...w.pts, pb], z = this.zoom, rr = Math.max(5, 6 / z), hit = Math.max(12, 16 / z);
+    const pts = [pa, ...this.wirePoints(w), pb], z = this.zoom, rr = Math.max(5, 6 / z), hit = Math.max(12, 16 / z);
     const mk = (x, y, kind, idx) => {
       const c = document.createElementNS(SVGNS, 'g'); c.setAttribute('class', 'wh ' + kind); c.setAttribute('transform', `translate(${x},${y})`);
       c.innerHTML = kind === 'pt' ? `<circle r="${hit}" class="wh-hit"/><circle r="${rr}" class="wh-dot"/>`
@@ -439,11 +462,12 @@ export class CircuitCanvas {
       const a = pts[i], b = pts[i + 1];
       if (Math.hypot(b.x - a.x, b.y - a.y) > 26 / Math.min(1, z)) mk((a.x + b.x) / 2, (a.y + b.y) / 2, 'mid', i);
     }
-    w.pts.forEach((q, i) => mk(q.x, q.y, 'pt', i));
+    this.wirePoints(w).forEach((q, i) => mk(q.x, q.y, 'pt', i));
   }
   _handleDown(e, w, kind, idx) {
     e.stopPropagation(); e.preventDefault();
     const el = e.currentTarget; el.setPointerCapture(e.pointerId);
+    if (!w.pts.length) w.pts = this.wirePoints(w).map((q) => ({ x: q.x, y: q.y }));   // the automatic route becomes editable bends
     const now = performance.now();
     if (kind === 'pt' && this._lastTap && this._lastTap.w === w.id && this._lastTap.i === idx && now - this._lastTap.t < 350) {   // double-tap: remove the bend
       w.pts.splice(idx, 1); this._lastTap = null; this._drawWire(w); this._drawHandles(w); this.emit('change', { structural: false }); return;
@@ -466,8 +490,11 @@ export class CircuitCanvas {
   /** orthogonal route: leave each pin straight out, then horizontal / vertical runs (grid-aligned) */
   _tidyPts(w) {
     const pa = this.pinPos(w.a), pb = this.pinPos(w.b); if (!pa || !pb) return [];
+    return this._orthoPts(pa, pb);
+  }
+  _orthoPts(pa, pb) {
     const da = this._dir(pa), db = this._dir(pb), L = 15, s = this.snap, sn = (v) => Math.round(v / s) * s;
-    const p1 = { x: sn(pa.x + da[0] * L), y: sn(pa.y + da[1] * L) }, p2 = { x: sn(pb.x + db[0] * L), y: sn(pb.y + db[1] * L) };
+    const p1 = { x: da[0] ? sn(pa.x + da[0] * L) : pa.x, y: da[1] ? sn(pa.y + da[1] * L) : pa.y }, p2 = { x: db[0] ? sn(pb.x + db[0] * L) : pb.x, y: db[1] ? sn(pb.y + db[1] * L) : pb.y };
     const ha = da[0] !== 0, hb = db[0] !== 0, pts = [p1];
     if (ha && hb) { const mx = sn((p1.x + p2.x) / 2); pts.push({ x: mx, y: p1.y }, { x: mx, y: p2.y }); }
     else if (!ha && !hb) { const my = sn((p1.y + p2.y) / 2); pts.push({ x: p1.x, y: my }, { x: p2.x, y: my }); }
@@ -482,7 +509,7 @@ export class CircuitCanvas {
       if ((a.x === c.x && c.x === n.x) || (a.y === c.y && c.y === n.y)) continue;
       out.push(c);
     }
-    return out;
+    return simplify(orthogonalize([pa, ...out, pb])).slice(1, -1);
   }
   /** tidy one wire (id) or all wires: orthogonal routes */
   tidyWires(id) {

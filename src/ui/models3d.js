@@ -227,6 +227,8 @@ export function buildPart3D(o) {
   } else if (sp === 'encoder') {
     const cx = fx(0.43), cz = fz(0.47), sh = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 14, 20), mat(0xbfbfbf, { metal: true, r: 0.4 })); sh.position.set(cx, T + 6.5 + 7, cz); add(sh);
     const nut = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 2, 6), mat(C.silver, { metal: true, r: 0.3 })); nut.position.set(cx, T + 7.5, cz); add(nut);
+    const flat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 6, 3.4), mat(0x8c8c8c, { metal: true, r: 0.5 })); flat.position.set(2.75, 4, 0); sh.add(flat);   // D-shaft flat shows the turn
+    out.update = () => { sh.rotation.y = -((+part.el.angle || 0) * Math.PI) / 180; };
   } else if (sp === 'servo') {
     // SG90: blue case, mounting tabs, output boss with the horn turning to el.angle, 3-wire lead to the connector
     const blue = new THREE.MeshPhysicalMaterial({ color: 0x2457c5, roughness: 0.35, transmission: 0.05, clearcoat: 0.4 });

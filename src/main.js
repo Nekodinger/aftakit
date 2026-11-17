@@ -690,6 +690,11 @@ function renderProps(soft) {
 async function loadExample(id) {
   const ex = EXAMPLES.find((e) => e.id === id); if (!ex) return;
   stopSim(); await canvas.setModel(exampleModel(ex));
+  try {                                                        // examples are built on a breadboard, with right-angle wiring
+    const { autoBreadboard } = await import('./ui/autobb.js');
+    state.autobb = [...canvas.parts.values()].some((p) => BY_TAG[p.type]?.breadboard) ? { ok: true, existing: true } : await autoBreadboard(canvas, BY_TAG, { tidy: false });
+    canvas.bundleWires(); canvas.history = []; canvas.hpos = -1; canvas.snapshot();
+  } catch (e) { console.warn('breadboard layout', e); }
   editor.value = ex.code; state.exampleId = id; state.projectId = null; state.libs = []; renderLibs(); state.hex = null; state.wasm = null; state.hexFor = null; state.hexOnly = false;
   $('#projectTitle').value = ex.title; editor.marks.clear();
   addLog('info', `Contoh dimuat: ${ex.title}. ${ex.board === 'design' ? 'Board ini dalam mode desain; tekan Jalankan untuk memeriksa rangkaian.' : 'Tekan Jalankan.'}`);
@@ -730,6 +735,15 @@ async function doAction(act) {
     case 'duplicate': if (canvas.selected?.kind === 'part') canvas.duplicate(canvas.selected.id); break;
     case 'delete': canvas.deleteSelected(); break;
     case 'wire-text': openWireText(); break;
+    case 'auto-wire': autoWire(); break;
+    case 'auto-code': autoCode(); break;
+    case 'newbie': toggleNewbie(); break;
+    case 'auto-bb': {
+      stopSim(); const { autoBreadboard } = await import('./ui/autobb.js'); const r = await autoBreadboard(canvas, BY_TAG);
+      if (r.ok) { toast(`${r.placed.length} komponen ditancapkan ke breadboard, ${r.wires} kabel dirapikan.`); addLog('ok', `Breadboard: ${r.placed.join(', ')} ditancapkan; semua sambungan listrik tetap sama.`); runCheck(); }
+      else toast(r.reason, true);
+      break;
+    }
     case 'bundle-wires': { const n = canvas.bundleWires(); toast(n ? `${n} kabel disatukan jadi bundel rapi.` : 'Belum ada 2+ kabel antara dua komponen yang sama.'); break; }
     case 'tidy-wires': toast(canvas.tidyWires() ? 'Semua kabel dirapikan (jalur siku).' : 'Belum ada kabel.'); break;
     case 'clear-wires': for (const w of [...canvas.wires]) if (!w.plug) canvas._removeWire(w, true); canvas.emit('change', { structural: true }); break;
@@ -786,7 +800,8 @@ function openHelp() {
   <h4>Membuat kabel</h4><ul><li>Ketuk pin pertama, lalu ketuk pin tujuan. Atau seret dari pin ke pin.</li><li>Selama kabel belum selesai: geser layar (satu jari / seret area kosong) dan cubit zoom tidak membatalkan kabel; ketuk area kosong untuk menambah belokan; seret kabel ke tepi layar untuk menggeser otomatis. Batal: tombol ✕ Batal, Esc, atau ketuk pin awal lagi.</li><li>Ketuk kabel untuk memilih: seret titik ● untuk memindah belokan, seret + untuk menambah belokan, ketuk ganda ● untuk menghapus. Panel Properti: ganti warna, <b>Rapikan kabel ini</b>, <b>Rapikan semua kabel</b>, hapus.</li><li><b>Ketik</b> (toolbar): sambung kabel dengan teks, satu baris per kabel, mis. <code>esp32:D21 - oled1:SDA kuning</code>, <code>esp32:GND ke bb1:-</code>, <code>bb1:a10 - led1:A</code>.</li></ul>
   <h4>Bundel kabel</h4><ul><li>Menu Edit → <b>Bundel kabel</b> (atau panel Properti kabel): kabel antara dua komponen yang sama disatukan jadi satu jalur rapi, berjajar sejajar, menghindari badan komponen, diikat cable tie. Bundel ikut menyesuaikan saat komponen digeser; <b>Lepas bundel</b> untuk mengurai.</li></ul>
   <h4>Desain PCB</h4><ul><li>Tombol <b>PCB</b>: rangkaian yang sudah benar dijadikan PCB 2 lapis. Breadboard hilang, sambungannya jadi jalur tembaga; modul & board dicolok lewat female header di posisi pin aslinya.</li><li>Seret komponen untuk mengatur posisi, <b>Rute otomatis</b> untuk menarik jalur (clearance 0,2 mm, via otomatis), cek DRC, lalu <b>Unduh Gerber (.zip)</b> — langsung bisa diunggah ke pabrik PCB.</li></ul>
-  <h4>Tampilan 3D</h4><ul><li>Tombol <b>3D</b> di toolbar: rangkaian dalam 3D dan tetap tersimulasi (LED menyala, layar, NeoPixel, servo ikut bergerak).</li><li>Seret: putar · dua jari / klik kanan: geser · cubit / scroll: zoom · tombol Iso/Atas/Depan · keyboard WASD, Q/E, +/−.</li><li>Tekan tombol dan putar potensiometer langsung di model 3D; ketuk komponen untuk melihat pin dan sambungannya.</li></ul>
+  <h4>Auto wiring · Auto kode · Newbie</h4><ul><li><b>Auto wiring</b>: semua pin komponen yang belum tersambung diberi pin mikrokontroler yang cocok (VCC sesuai tegangan modul, GND, I²C/SPI/UART bawaan, ADC untuk keluaran analog, PWM bila perlu, GPIO bebas untuk sisanya; LED lewat resistor bila ada), lalu ditancapkan ke breadboard dan dirapikan. Alasan tiap pin ditulis di Log.</li><li><b>Auto kode</b>: membaca komponen terhubung ke pin mana, lalu membuat program lengkap dengan library yang sesuai. Bisa dipakai terpisah dari Auto wiring (misalnya setelah merangkai sendiri).</li><li><b>Newbie</b>: panduan langkah demi langkah. Tahap <i>Rangkai</i> menunjukkan pin mana disambung ke mana beserta alasannya (pin menyala kuning, langkah tercentang sendiri saat kabel dibuat), tahap <i>Kode</i> menyusun program per komponen, tahap <i>Uji</i> mengajarkan cara menguji tiap komponen.</li><li>Contoh proyek otomatis dipasang di breadboard; menu Edit → <b>Pasang di breadboard</b> melakukan hal yang sama untuk rangkaianmu, tanpa mengubah sambungan listriknya. Semua kabel digambar bersiku.</li></ul>
+  <h4>Tampilan 3D</h4><ul><li>Tombol <b>3D</b> di toolbar: rangkaian dalam 3D dan tetap tersimulasi (LED menyala, layar, NeoPixel, servo ikut bergerak).</li><li>Seret: putar · dua jari / klik kanan: geser · cubit / scroll: zoom · tombol Iso/Atas/Depan · keyboard WASD, Q/E, +/−.</li><li>Komponen bisa dioperasikan langsung di 3D: tekan tombol, putar potensio / encoder, gerakkan joystick, geser saklar, ketuk keypad / DIP / remote IR, dan <b>seret sensor naik-turun</b> untuk mengubah nilainya (suhu, jarak, cahaya, gas …). Panel <b>Kontrol</b> pada kartu komponen berisi semua nilai sensor.</li><li><b>Ukur</b> (M): multimeter. Ketuk pin, lubang breadboard, atau ujung kabel untuk memasang probe; tegangan, HIGH/LOW/PWM, mode pin (INPUT/OUTPUT) dan sambungannya tampil langsung. Dua probe menampilkan beda tegangannya.</li><li><b>Diagnosa</b> (G): daftar kesalahan dari cek rangkaian, peringatan simulasi, dan pengukuran daya tiap komponen. Komponen bermasalah diberi kotak merah / kuning; ketuk butir untuk menuju komponennya.</li></ul>
   <h4>Kanvas</h4><ul><li>Satu jari di area kosong: geser kanvas. Dua jari: cubit untuk zoom.</li><li>Seret komponen untuk memindah. Saat simulasi berjalan, seret lewat label nama di atasnya.</li><li>Tombol putar, duplikat, hapus, urungkan/ulangi ada di toolbar atas.</li></ul>
   <h4>Simulasi</h4><ul><li>Desain → Kode → Simulasi. Tekan <b>Jalankan</b>; galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Kode dijalankan untuk Arduino Uno/Nano, ESP32 DevKit, ESP32-CAM, NodeMCU / Wemos D1 mini (ESP8266) dan Raspberry Pi Pico.</li></ul>
   <h4>ESP32: WiFi, internet, Bluetooth, kamera</h4><ul><li><b>WiFi</b> tersimulasi: <code>WiFi.begin()</code> tersambung ±1 detik (nama/password bebas, mis. "Wokwi-GUEST"), IP 10.10.0.2.</li><li><b>Internet nyata</b>: <code>HTTPClient</code> (GET/POST, http/https) memakai koneksi iPad/laptop ini; layanan tanpa izin CORS otomatis lewat proxy simulator.</li><li><b>Blynk, Telegram, MQTT, ThingSpeak</b>: <code>WiFiClient</code> / <code>WiFiClientSecure</code> / <code>WiFiUDP</code> tersambung sungguhan lewat <b>gateway IoT</b> server kompilasi (seperti Wokwi), jadi library asli (BlynkSimpleEsp32, UniversalTelegramBot, PubSubClient…) dan API key asli langsung bisa dipakai.</li><li><b>Library</b>: <code>#include</code> library dari Arduino Library Manager diunduh otomatis. Library .zip (mis. Edge Impulse) ditambahkan di panel <b>Library</b>.</li><li><b>Bluetooth</b>: <code>BluetoothSerial</code> tersambung ke tab <b>Bluetooth</b> di konsol (seperti aplikasi Serial Bluetooth Terminal di HP).</li><li><b>ESP32-CAM</b>: <code>esp_camera_fb_get()</code> mengambil foto JPEG dari tab <b>Kamera</b>: kamera iPad/laptop, foto unggahan, atau gambar contoh.</li><li>Seperti ESP32 asli: ADC2 (GPIO 0, 2, 4, 12–15, 25–27) tidak bisa dibaca saat WiFi aktif — pakai GPIO 32–39. GPIO 34–39 hanya input. Logika 3,3 V.</li><li><b>Edge Impulse</b>: unggah ekspor "Arduino library" di panel Library; ESP32-CAM memakai gambar dari tab Kamera (<code>fmt2rgb888</code> didukung).</li><li>Belum didukung: WebServer / server di dalam ESP32 (gateway hanya koneksi keluar), Bluetooth BLE, FreeRTOS task. Waktu CPU diperkirakan, bukan akurat per siklus.</li></ul>`;
@@ -860,7 +875,13 @@ async function toggle3D(force) {
   const btn = $('#tb3d');
   if (!view3d) {
     btn.disabled = true;
-    try { const { init3D } = await import('./ui/view3d.js'); view3d = init3D({ canvas, sim, host: $('#view3d'), catalog: BY_TAG }); view3d.onToggle = (on) => { btn.classList.toggle('on', on); document.body.classList.toggle('mode-3d', on); }; }
+    try { const { init3D } = await import('./ui/view3d.js'); view3d = init3D({ canvas, sim, host: $('#view3d'), catalog: BY_TAG, toast, check: () => runCheck(false),
+      onAttr: (part, key, commit) => {                       // a sensor value changed in the 3D view: same effects as the Properti panel
+        if (key === 'pixels') { canvas.emit('change', { structural: true }); canvas._refreshPins(part); }
+        if (key === 'common') canvas._refreshPins(part);
+        if (commit) canvas.snapshot();
+        if (state.panel === 'props' && canvas.selected?.id === part.id) renderProps(true);
+      } }); view3d.onToggle = (on) => { btn.classList.toggle('on', on); document.body.classList.toggle('mode-3d', on); }; }
     catch (e) { toast('Tampilan 3D gagal dimuat: ' + e.message, true); return; }
     finally { btn.disabled = false; }
   }
@@ -885,3 +906,55 @@ async function togglePcb(force) {
 }
 $('#tbPcb').onclick = () => togglePcb();
 window.__pcb = { toggle: togglePcb, get: () => pcbView };   // handle for automated tests
+
+// ---------------------------------------------------------------- Auto wiring, Auto kode, Newbie (loaded on first use)
+const learn = () => Promise.all([import('./learn/autowire.js'), import('./learn/autocode.js'), import('./ui/autobb.js')]);
+async function autoWire() {
+  const [{ planWiring, applyWiring }, , { autoBreadboard }] = await learn();
+  const plan = planWiring(canvas, BY_TAG);
+  if (!plan) { toast('Tambahkan mikrokontroler (ESP32 / Arduino) dulu.', true); return; }
+  if (!plan.steps.length) { toast('Semua pin komponen sudah tersambung.'); return; }
+  stopSim();
+  const n = applyWiring(canvas, plan);
+  for (const s of plan.steps) addLog('info', `Auto wiring: ${s.b} → ${s.a}. ${s.reason}`);
+  const hasBB = [...canvas.parts.values()].some((p) => BY_TAG[p.type]?.breadboard);
+  const r = hasBB ? null : await autoBreadboard(canvas, BY_TAG);
+  if (!r?.ok) canvas.bundleWires();
+  if (r && !r.ok) addLog('info', 'Breadboard: ' + r.reason);
+  window.__learn.lastBB = r;
+  runCheck(true);
+  toast(`${n} kabel dipasang${r?.ok ? ` dan ${r.placed.length} komponen ditancapkan ke breadboard` : ''}. Lihat Log untuk alasan tiap pin.`);
+  guide?.refresh();
+}
+async function autoCode() {
+  const [, { readCircuit, generateSketch }] = await learn();
+  const circ = readCircuit(canvas, BY_TAG);
+  if (!circ) { toast('Tambahkan mikrokontroler dulu.', true); return; }
+  if (!circ.items.length) { toast('Belum ada komponen di workspace.', true); return; }
+  const g = generateSketch(circ);
+  $('#acCode').textContent = g.code;
+  const missing = g.parts.filter((p) => p.todo), unk = g.unknown;
+  $('#acInfo').textContent = `${circ.cat?.name || 'Board'} · ${g.parts.filter((p) => p.piece).length} komponen dibuatkan kodenya berdasarkan pin yang tersambung.`;
+  $('#acParts').innerHTML = (missing.length ? `<div class="chk warn"><span class="ic">!</span><span>Belum tersambung lengkap: ${esc(missing.map((p) => p.id).join(', '))}. Pakai Auto wiring dulu agar kodenya lengkap.</span></div>` : '') + (unk.length ? `<div class="chk info"><span class="ic">i</span><span>Belum ada templat kode untuk: ${esc(unk.join(', '))} (lihat petunjuk di panel Properti).</span></div>` : '');
+  $('#acUse').onclick = () => { editor.value = g.code; setCompilerState(''); $('#dlgAutoCode').close(); setMode('code'); toast('Kode otomatis dipasang di editor. Tekan Jalankan untuk mencoba.'); };
+  $('#acCopy').onclick = () => navigator.clipboard?.writeText(g.code).then(() => toast('Kode disalin.'));
+  $('#dlgAutoCode').showModal();
+}
+let guide = null;
+async function toggleNewbie(force) {
+  if (!guide) {
+    const { initGuide } = await import('./learn/guide.js');
+    guide = initGuide({ canvas, catalog: BY_TAG, host: $('#guide'), editor, act: {
+      run: () => run(), check: () => runCheck(false), setMode, toast, running: () => sim.running,
+      bundle: () => canvas.bundleWires(), open3D: () => toggle3D(true),
+      autobb: async () => { const { autoBreadboard } = await import('./ui/autobb.js'); const r = await autoBreadboard(canvas, BY_TAG); toast(r.ok ? `${r.placed.length} komponen ditancapkan ke breadboard.` : r.reason, !r.ok); },
+    } });
+    guide.onToggle = (on) => $('#tbNewbie').classList.toggle('on', on);
+    sim.on('state', () => guide.isOn && guide.ping());
+  }
+  guide.toggle(force);
+}
+$('#tbAutoWire').onclick = () => autoWire();
+$('#tbAutoCode').onclick = () => autoCode();
+$('#tbNewbie').onclick = () => toggleNewbie();
+window.__learn = { autoWire, autoCode, toggleNewbie, get guide() { return guide; } };   // handle for automated tests

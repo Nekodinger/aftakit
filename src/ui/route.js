@@ -17,7 +17,10 @@ const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
  * Shortest orthogonal path from S to T (points in px) that avoids the rectangles (px: {x0,y0,x1,y1}).
  * @returns array of corner points (S … T), or null.
  */
-export function routeOrthogonal(S, T, obstacles, { cell = 8, bend = 6, margin = 120, startDir = null } = {}) {
+export function routeOrthogonal(S, T, obstacles, opts = {}) {
+  return route1(S, T, obstacles, opts, false) || route1(S, T, obstacles, opts, true);   // ends buried in an obstacle: carve a way out
+}
+function route1(S, T, obstacles, { cell = 8, bend = 6, margin = 120, startDir = null } = {}, doCarve) {
   const xs = [S.x, T.x, ...obstacles.flatMap((o) => [o.x0, o.x1])], ys = [S.y, T.y, ...obstacles.flatMap((o) => [o.y0, o.y1])];
   const ox = Math.min(...xs) - margin, oy = Math.min(...ys) - margin;
   const W = Math.ceil((Math.max(...xs) + margin - ox) / cell) + 1, H = Math.ceil((Math.max(...ys) + margin - oy) / cell) + 1;
@@ -28,6 +31,19 @@ export function routeOrthogonal(S, T, obstacles, { cell = 8, bend = 6, margin = 
     for (let j = j0; j <= j1; j++) blocked.fill(1, j * W + i0, j * W + i1 + 1);
   }
   const cs = [Math.round((S.x - ox) / cell), Math.round((S.y - oy) / cell)], ct = [Math.round((T.x - ox) / cell), Math.round((T.y - oy) / cell)];
+  // an end inside an obstacle (a pin on a board's header): open the shortest straight way out of it
+  const carve = (c, pref) => {
+    let best = null;
+    for (let d = 0; d < 4; d++) {
+      let i = c[0], j = c[1], n = 0;
+      while (n < 60 && i >= 0 && j >= 0 && i < W && j < H && blocked[j * W + i]) { i += DIRS[d][0]; j += DIRS[d][1]; n++; }
+      const cost = n + (pref != null && d !== pref ? 3 : 0);
+      if (n < 60 && (!best || cost < best.cost)) best = { d, n, cost };
+    }
+    if (!best) return;
+    for (let k = 0, i = c[0], j = c[1]; k <= best.n; k++, i += DIRS[best.d][0], j += DIRS[best.d][1]) if (i >= 0 && j >= 0 && i < W && j < H) blocked[j * W + i] = 0;
+  };
+  if (doCarve) { carve(cs, startDir); carve(ct, null); }
   blocked[cs[1] * W + cs[0]] = 0; blocked[ct[1] * W + ct[0]] = 0;
   const N = W * H, g = new Float32Array(N * 4).fill(Infinity), from = new Int32Array(N * 4).fill(-1);
   const h = (i, j) => Math.abs(i - ct[0]) + Math.abs(j - ct[1]);

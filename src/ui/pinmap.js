@@ -86,7 +86,7 @@ function compRole(part, info) {
 }
 
 // ---------------------------------------------------------------- connectivity (direct wires + breadboard strips)
-function netsOf(canvas) {
+export function netsOf(canvas) {
   const parent = new Map();
   const find = (x) => {
     if (!parent.has(x)) { parent.set(x, x); return x; }
@@ -104,34 +104,87 @@ function netsOf(canvas) {
   return find;
 }
 
+export const mcusOf = (canvas, catalog) => [...canvas.parts.values()].filter((p) => catalog[p.type]?.board || catalog[p.type]?.cat === 'Mikrokontroler');
+export const compsOf = (canvas, catalog, mcu) => [...canvas.parts.values()].filter((p) => p !== mcu && !isBB(p.type) && p.pinInfo.length && !(catalog[p.type]?.board));
+export { compRole };
+
+/** who is connected to which MCU pin: direct wires, and through breadboard strips / other parts ("via") */
+export function wiringState(canvas, mcu, cs) {
+  const find = netsOf(canvas);
+  const direct = new Map();                  // `${mcuPin}|${compId}` -> [compPin]
+  const where = new Map();                   // compRef -> mcuPin (direct) or mcuPin + '*' (indirect)
+  for (const w of canvas.wires) {
+    if (w.plug) continue;
+    for (const [a, b] of [[w.a, w.b], [w.b, w.a]]) {
+      if (pidOf(a) !== mcu.id) continue;
+      const cid = pidOf(b); if (!cs.some((c) => c.id === cid)) continue;
+      const k = `${pinOf(a)}|${cid}`; (direct.get(k) || direct.set(k, []).get(k)).push(pinOf(b)); where.set(b, pinOf(a));
+    }
+  }
+  const via = new Map();
+  const rootOf = new Map(mcu.pinInfo.map((i) => [find(`${mcu.id}:${i.name}`), i.name]));
+  for (const c of cs) for (const i of c.pinInfo) {
+    const ref = `${c.id}:${i.name}`; if (where.has(ref)) continue;
+    const m = rootOf.get(find(ref)); if (!m) continue;
+    const k = `${m}|${c.id}`; (via.get(k) || via.set(k, []).get(k)).push(i.name); where.set(ref, m + '*');
+  }
+  return { direct, via, where };
+}
+
+/**
+ * Sensible MCU pins for the still-unconnected pins of one component.
+ * @param usedMcu MCU pins already taken (shared between components when planning several)
+ * @returns [{ mcuPin, compPin, role, sig, v }]
+ */
+export function planComp(canvas, catalog, mcu, comp, usedMcu) {
+  const cat = catalog[mcu.type], st = wiringState(canvas, mcu, compsOf(canvas, catalog, mcu));
+  const infos = mcu.pinInfo.map((i) => ({ i, f: mcuPinInfo(mcu, i, cat) }));
+  usedMcu ||= new Set();
+  for (const x of st.where.values()) usedMcu.add(x.replace('*', ''));
+  const has = (n) => infos.find((x) => x.i.name === n);
+  const avr = /^(uno|nano|mega)$/.test(cat?.board || ''), esp = /esp32/.test(cat?.board || '');
+  const pick = (pred, allowUsed = false) => { const x = infos.find((x) => pred(x) && (allowUsed || !usedMcu.has(x.i.name))); return x?.i.name; };
+  const power = (v) => {
+    const want = avr ? ['5V', 'VCC'] : v >= 5 ? ['VIN', '5V', 'VBUS', 'VSYS', 'VCC'] : ['3V3', '3.3V', 'VCC', 'VIN'];
+    for (const w of want) { const x = infos.find((x) => x.f.kind === 'power' && base(x.i.name) === w); if (x) return x.i.name; }
+    return infos.find((x) => x.f.kind === 'power')?.i.name;
+  };
+  const gnd = () => infos.find((x) => x.f.kind === 'gnd')?.i.name;
+  const prefDigital = esp ? [4, 13, 14, 27, 26, 25, 5, 18, 19, 23, 15, 2, 12, 33, 32] : null;   // keep ADC1 pins for analog sensors
+  const digital = (pwm, input) => {
+    if (prefDigital) for (const g of prefDigital) { const x = infos.find((x) => x.f.gpio === g && !usedMcu.has(x.i.name)); if (x) return x.i.name; }
+    if (avr) { const order = pwm ? ['3', '5', '6', '9', '10', '11', '2', '4', '7', '8', '12', '13'] : ['2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13']; for (const g of order) { const x = infos.find((x) => x.f.gpio === g && !usedMcu.has(x.i.name)); if (x) return x.i.name; } }
+    return pick((x) => x.f.kind === 'gpio' && (input || !x.f.inOnly) && !x.f.warn && !x.f.adc) || pick((x) => x.f.kind === 'gpio' && (input || !x.f.inOnly) && !/Serial/.test(x.f.warn || ''));
+  };
+  const analog = () => (esp ? pick((x) => x.f.adc1) : null) || pick((x) => x.f.adc) || digital();
+  const bus = (tag, shared = true) => infos.find((x) => x.f.tags?.includes(tag) && (shared || !usedMcu.has(x.i.name)))?.i.name;
+  const plan = [];
+  for (const info of comp.pinInfo) {
+    const ref = `${comp.id}:${info.name}`; if (st.where.has(ref)) continue;
+    const r = compRole(comp, info); let m = null;
+    if (r.role === 'skip') continue;
+    if (r.role === 'gnd') m = gnd();
+    else if (r.role === 'power') m = power(r.v);
+    else if (r.role === 'i2c') m = bus('I2C ' + r.sig);
+    else if (r.role === 'spi') m = r.sig === 'SS' ? (bus('SPI SS', false) || digital()) : bus('SPI ' + r.sig);
+    else if (r.role === 'uart') m = r.sig === 'TX' ? (esp ? 'RX2' : avr ? '2' : bus('UART RX')) : (esp ? 'TX2' : avr ? '3' : bus('UART TX'));
+    else if (r.role === 'analog') m = analog();
+    else m = digital(r.pwm);
+    if (!m || !has(m)) continue;
+    plan.push({ mcuPin: m, compPin: info.name, ...r });
+    if (!['gnd', 'power', 'i2c'].includes(r.role) && !(r.role === 'spi' && r.sig !== 'SS')) usedMcu.add(m);
+  }
+  return plan;
+}
+
 export function initPinMap({ canvas, catalog, host, toast }) {
   let mcuId = null, onlyUsed = false;
 
-  const mcus = () => [...canvas.parts.values()].filter((p) => catalog[p.type]?.board || catalog[p.type]?.cat === 'Mikrokontroler');
-  const comps = (mcu) => [...canvas.parts.values()].filter((p) => p !== mcu && !isBB(p.type) && p.pinInfo.length && !(catalog[p.type]?.board));
+  const mcus = () => mcusOf(canvas, catalog);
+  const comps = (mcu) => compsOf(canvas, catalog, mcu);
   const label = (part, info) => canvas.pinLabel(part, info);
 
-  function state(mcu, cs) {
-    const find = netsOf(canvas);
-    const direct = new Map();                  // `${mcuPin}|${compId}` -> [compPin]
-    const where = new Map();                   // compRef -> mcuPin (direct)
-    for (const w of canvas.wires) {
-      if (w.plug) continue;
-      for (const [a, b] of [[w.a, w.b], [w.b, w.a]]) {
-        if (pidOf(a) !== mcu.id) continue;
-        const cid = pidOf(b); if (!cs.some((c) => c.id === cid)) continue;
-        const k = `${pinOf(a)}|${cid}`; (direct.get(k) || direct.set(k, []).get(k)).push(pinOf(b)); where.set(b, pinOf(a));
-      }
-    }
-    const via = new Map();                     // indirect (breadboard / other parts): `${mcuPin}|${compId}` -> [compPin]
-    const rootOf = new Map(mcu.pinInfo.map((i) => [find(`${mcu.id}:${i.name}`), i.name]));
-    for (const c of cs) for (const i of c.pinInfo) {
-      const ref = `${c.id}:${i.name}`; if (where.has(ref)) continue;
-      const m = rootOf.get(find(ref)); if (!m) continue;
-      const k = `${m}|${c.id}`; (via.get(k) || via.set(k, []).get(k)).push(i.name); where.set(ref, m + '*');
-    }
-    return { direct, via, where };
-  }
+  const state = (mcu, cs) => wiringState(canvas, mcu, cs);
 
   // ---------------------------------------------------------------- edits
   function setCell(mcu, comp, mcuPin, compPin) {
@@ -149,44 +202,8 @@ export function initPinMap({ canvas, catalog, host, toast }) {
   }
 
   function autoMap(mcu, comp) {
-    const cat = catalog[mcu.type], st = state(mcu, comps(mcu));
-    const infos = mcu.pinInfo.map((i) => ({ i, f: mcuPinInfo(mcu, i, cat) }));
-    const usedMcu = new Set([...st.where.values()].map((x) => x.replace('*', '')));
-    const has = (n) => infos.find((x) => x.i.name === n);
-    const avr = /^(uno|nano|mega)$/.test(cat?.board || ''), esp = /esp32/.test(cat?.board || '');
-    const pick = (pred, allowUsed = false) => { const x = infos.find((x) => pred(x) && (allowUsed || !usedMcu.has(x.i.name))); return x?.i.name; };
-    const power = (v) => {
-      const want = avr ? ['5V', 'VCC'] : v >= 5 ? ['VIN', '5V', 'VBUS', 'VSYS', 'VCC'] : ['3V3', '3.3V', 'VCC', 'VIN'];
-      for (const w of want) { const x = infos.find((x) => x.f.kind === 'power' && base(x.i.name) === w); if (x) return x.i.name; }
-      return infos.find((x) => x.f.kind === 'power')?.i.name;
-    };
-    const gnd = () => infos.find((x) => x.f.kind === 'gnd')?.i.name;
-    const prefDigital = esp ? [4, 13, 14, 27, 26, 25, 5, 18, 19, 23, 15, 2, 12, 33, 32] : null;   // keep ADC1 pins for analog sensors
-    const digital = (pwm) => {
-      if (prefDigital) for (const g of prefDigital) { const x = infos.find((x) => x.f.gpio === g && !usedMcu.has(x.i.name)); if (x) return x.i.name; }
-      if (avr) { const order = pwm ? ['3', '5', '6', '9', '10', '11', '2', '4', '7', '8', '12', '13'] : ['2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13']; for (const g of order) { const x = infos.find((x) => x.f.gpio === g && !usedMcu.has(x.i.name)); if (x) return x.i.name; } }
-      return pick((x) => x.f.kind === 'gpio' && !x.f.inOnly && !x.f.warn && !x.f.adc) || pick((x) => x.f.kind === 'gpio' && !x.f.inOnly && !/Serial/.test(x.f.warn || ''));
-    };
-    const analog = () => (esp ? pick((x) => x.f.adc1) : null) || pick((x) => x.f.adc) || digital();
-    const bus = (tag, shared = true) => infos.find((x) => x.f.tags?.includes(tag) && (shared || !usedMcu.has(x.i.name)))?.i.name;
-    const plan = [];
-    for (const info of comp.pinInfo) {
-      const ref = `${comp.id}:${info.name}`; if (st.where.has(ref)) continue;
-      const r = compRole(comp, info); let m = null;
-      if (r.role === 'skip') continue;
-      if (r.role === 'gnd') m = gnd();
-      else if (r.role === 'power') m = power(r.v);
-      else if (r.role === 'i2c') m = bus('I2C ' + r.sig);
-      else if (r.role === 'spi') m = r.sig === 'SS' ? (bus('SPI SS', false) || digital()) : bus('SPI ' + r.sig);
-      else if (r.role === 'uart') m = r.sig === 'TX' ? (esp ? 'RX2' : avr ? '2' : bus('UART RX')) : (esp ? 'TX2' : avr ? '3' : bus('UART TX'));
-      else if (r.role === 'analog') m = analog();
-      else m = digital(r.pwm);
-      if (!m || !has(m)) continue;
-      plan.push([m, info.name]);
-      if (!['gnd', 'power', 'i2c'].includes(r.role) && !(r.role === 'spi' && r.sig !== 'SS')) usedMcu.add(m);
-    }
     let n = 0;
-    for (const [m, c] of plan) if (canvas._addWire(`${mcu.id}:${m}`, `${comp.id}:${c}`, null, true)) n++;
+    for (const x of planComp(canvas, catalog, mcu, comp)) if (canvas._addWire(`${mcu.id}:${x.mcuPin}`, `${comp.id}:${x.compPin}`, null, true)) n++;
     if (n) canvas.emit('change', { structural: true });
     return n;
   }

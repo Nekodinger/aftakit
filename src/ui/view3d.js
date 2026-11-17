@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { buildPart3D, SPEC, pcbEdgeColor } from './models3d.js';
+import * as L from './lab3d.js';
 
 const MM = 1 / 3.7795;                                  // px → mm
 const BB_H = 8.5, PCB = 1.6, HEADER = 2.5;
@@ -97,8 +98,9 @@ function resistorBands(v) {
   return [BAND[d1], BAND[d2], BAND[Math.min(9, e)], '#c9a227'];
 }
 
+
 // ------------------------------------------------------------------ the view
-export function init3D({ canvas, sim, host, catalog }) {
+export function init3D({ canvas, sim, host, catalog, onAttr, check, toast }) {
   host.innerHTML = `
     <canvas class="v3-gl"></canvas>
     <div class="v3-labels"></div>
@@ -109,16 +111,31 @@ export function init3D({ canvas, sim, host, catalog }) {
       <span class="v3-sep"></span>
       <button data-v="iso" title="Tampilan isometrik (R)">Iso</button><button data-v="top" title="Tampak atas (T)">Atas</button><button data-v="front" title="Tampak depan (F)">Depan</button>
       <span class="v3-sep"></span>
+      <button data-v="probe" title="Multimeter: ketuk pin untuk mengukur tegangan (M)">Ukur</button>
+      <button data-v="diag" title="Cari kesalahan rangkaian (G)">Diagnosa<span class="v3-cnt" hidden></span></button>
       <button data-v="labels" class="on" title="Tampilkan label (L)">Label</button>
       <button data-v="close" class="v3-close" title="Kembali ke 2D (Esc)">2D</button>
     </div>
-    <div class="v3-help">Seret: putar · klik kanan / 2 jari: geser · scroll / pinch: zoom · WASD geser · Q/E putar · ketuk komponen untuk info · tekan tombol & putar potensiometer langsung di model</div>
+    <div class="v3-help">Seret: putar · klik kanan / 2 jari: geser · scroll / pinch: zoom · tekan tombol, putar potensio, seret sensor naik-turun untuk mengubah nilainya, ketuk keypad / saklar langsung di model · <b>Ukur</b>: multimeter · <b>Diagnosa</b>: cari kesalahan</div>
+    <div class="v3-side">
+      <section class="v3-meter" hidden></section>
+      <section class="v3-diag" hidden></section>
+    </div>
+    <div class="v3-tip" hidden></div>
+    <div class="v3-hud" hidden></div>
     <div class="v3-info" hidden></div>`;
   const glCanvas = host.querySelector('.v3-gl'), labelsEl = host.querySelector('.v3-labels'), info = host.querySelector('.v3-info');
+  const meterEl = host.querySelector('.v3-meter'), diagEl = host.querySelector('.v3-diag'), tipEl = host.querySelector('.v3-tip'), hudEl = host.querySelector('.v3-hud');
   let renderer = null, scene, camera, controls, root, raf = 0, open = false, showLabels = true;
   const items = new Map();                       // partId -> { part, group, top (mesh with texture), layers, dirty, last, kind, ... }
-  const wiresGroup = new THREE.Group();
+  const wiresGroup = new THREE.Group(), labGroup = new THREE.Group();
   let ground, grid, sun, bbox = new THREE.Box3(), rebuildT = 0, selected = null;
+  // lab state: multimeter probes, fault list, simulator warnings
+  let probeMode = false, diagOpen = false, issues = [], worst = new Map(), hoverMarker = null, anim = null, lastSlow = 0;
+  const probes = [], runtimeLog = [];
+  const PROBE_COLORS = ['#e53935', '#1e1e1e', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa'];
+  sim.on?.('log', (e) => { if ((e.level === 'warn' || e.level === 'error') && !runtimeLog.some((r) => r.text === e.text)) { runtimeLog.push({ level: e.level, text: e.text }); if (runtimeLog.length > 60) runtimeLog.shift(); } });
+  sim.on?.('state', (s) => { if (s === 'running') runtimeLog.length = 0; if (open) setTimeout(refreshIssues, 400); });
 
   function setup() {
     renderer = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
@@ -132,7 +149,9 @@ export function init3D({ canvas, sim, host, catalog }) {
     scene.add(sun, sun.target);
     ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ color: 0xf1ece2, roughness: 1 }));
     ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
-    root = new THREE.Group(); scene.add(root, wiresGroup);
+    root = new THREE.Group(); scene.add(root, wiresGroup, labGroup);
+    hoverMarker = new THREE.Mesh(new THREE.SphereGeometry(1.15, 18, 12), new THREE.MeshBasicMaterial({ color: 0xffd400, transparent: true, opacity: 0.85, depthTest: false }));
+    hoverMarker.renderOrder = 10; hoverMarker.visible = false; scene.add(hoverMarker);
     bindPointer();                                               // before the controls: our handler runs first
     controls = new OrbitControls(camera, glCanvas);
     controls.enableDamping = true; controls.dampingFactor = 0.12; controls.maxPolarAngle = Math.PI * 0.49; controls.screenSpacePanning = false;
@@ -164,13 +183,13 @@ export function init3D({ canvas, sim, host, catalog }) {
   function build() {
     if (!renderer) return;
     for (const it of items.values()) { it.obs?.disconnect(); disposeObj(it.group); root.remove(it.group); if (it.headerGroup) { disposeObj(it.headerGroup); root.remove(it.headerGroup); } }
-    items.clear(); labelsEl.replaceChildren();
+    items.clear(); labelsEl.querySelectorAll('.v3-label').forEach((n) => n.remove());
     const pl = plugged(); bbox.makeEmpty();
     for (const part of canvas.parts.values()) {
       const it = makePart(part, pl); if (!it) continue;
       items.set(part.id, it); root.add(it.group); if (it.headerGroup) root.add(it.headerGroup);
       const b = new THREE.Box3().setFromObject(it.group); if (!b.isEmpty()) bbox.union(b);
-      if (!isBB(part.type)) { const l = document.createElement('div'); l.className = 'v3-label'; l.innerHTML = `<i></i>${esc(part.id)}`; l.title = catalog[part.type]?.name || part.type; l.onclick = () => showInfo(part.id); labelsEl.append(l); it.label = l; }
+      if (!isBB(part.type)) { const l = document.createElement('div'); l.className = 'v3-label'; l.hidden = !showLabels; l.innerHTML = l._h = labelHTML(part); l.title = catalog[part.type]?.name || part.type; l.onclick = () => showInfo(part.id); labelsEl.append(l); it.label = l; }
     }
     buildWires(pl);
     if (bbox.isEmpty()) bbox.set(new THREE.Vector3(-50, 0, -50), new THREE.Vector3(50, 10, 50));
@@ -183,6 +202,7 @@ export function init3D({ canvas, sim, host, catalog }) {
     const sc = sun.shadow.camera; sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 1; sc.far = R * 6; sc.updateProjectionMatrix();
     theme();
     if (selected && items.has(selected)) showInfo(selected); else hideInfo();
+    afterBuild();
   }
 
   function texturedTop(part, it, W, D, T, opts = {}) {
@@ -294,18 +314,13 @@ export function init3D({ canvas, sim, host, catalog }) {
       if (w.plug) continue;
       const pa = canvas.pinPos(w.a), pb = canvas.pinPos(w.b); if (!pa || !pb) continue;
       const A = contactOf(w.a), B = contactOf(w.b); if (!A || !B) continue; const ya = A.y, yb = B.y;
-      const dist = A.distanceTo(B), hop = w.bundle && bundleHop.has(w.bundle) ? bundleHop.get(w.bundle) : Math.max(ya, yb) + 7 + Math.min(22, Math.max(4, dist * 0.18));
-      const pts = [A, A.clone().setY(ya + 7.5)];
-      if (w.pts?.length) for (const q of w.pts) pts.push(toV(q, hop));
-      else { const m = A.clone().lerp(B, 0.5); m.y = hop + 2; pts.push(A.clone().lerp(B, 0.2).setY(hop), m, A.clone().lerp(B, 0.8).setY(hop)); }
-      pts.push(B.clone().setY(yb + 7.5), B.clone().setY(yb + 7));
-      pts[0] = A.clone().setY(ya + 7);
-      let curve;
-      if (w.pts?.length) {                                            // routed wire: straight runs with small rounded corners
-        const P = [A.clone().setY(ya + 7), A.clone().setY(hop), ...w.pts.map((q) => toV(q, hop)), B.clone().setY(hop), B.clone().setY(yb + 7)];
-        curve = roundedPath(P.filter((q, i) => i === 0 || q.distanceTo(P[i - 1]) > 0.05), 2.2);
-      } else curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.5);
-      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(360, 24 + (w.pts?.length || 0) * 24 + pts.length * 14), 0.55, 8, false), new THREE.MeshStandardMaterial({ color: new THREE.Color(w.color || '#3d8bfd'), roughness: 0.45 }));
+      const dist = A.distanceTo(B), hop = w.bundle && bundleHop.has(w.bundle) ? bundleHop.get(w.bundle) : Math.max(ya, yb) + 7 + Math.min(14, Math.max(3, dist * 0.08));
+      // right-angle runs only: straight up from the pin, the 2D route (stored bends or the automatic orthogonal one) at one height, straight down
+      const route = canvas.wirePoints ? canvas.wirePoints(w) : w.pts || [];
+      const P = [A.clone().setY(ya + 7), A.clone().setY(hop), ...route.map((q) => toV(q, hop)), B.clone().setY(hop), B.clone().setY(yb + 7)];
+      const curve = roundedPath(P.filter((q, i) => i === 0 || q.distanceTo(P[i - 1]) > 0.05), 1.2);
+      const pts = P;
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(400, 16 + pts.length * 20), 0.55, 8, false), new THREE.MeshStandardMaterial({ color: new THREE.Color(w.color || '#3d8bfd'), roughness: 0.45 }));
       tube.castShadow = true; tube.userData.wire = w.id; wiresGroup.add(tube);
       if (w.bundle) tube.userData.bundle = w.bundle;
       for (const P of [A, B]) {                                        // Dupont housing on each end
@@ -335,88 +350,372 @@ export function init3D({ canvas, sim, host, catalog }) {
 
   // ---------------------------------------------------------------- labels & info card
   const v = new THREE.Vector3();
+  function project(p) { v.copy(p).project(camera); const w = host.clientWidth, h = host.clientHeight; return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, vis: v.z < 1 && v.x > -1.1 && v.x < 1.1 && v.y > -1.1 && v.y < 1.1 }; }
+  function labelHTML(part) {
+    const sum = L.propSummary(part, catalog[part.type]);
+    return `<i></i>${esc(part.id)}${sum ? `<small>${esc(sum)}</small>` : ''}`;
+  }
+  function updateLabel(id) { const it = items.get(id); if (it?.label) { const h = labelHTML(it.part); if (it.label._h !== h) { it.label._h = h; it.label.innerHTML = h; } } }
   function placeLabels() {
+    for (const p of probes) {
+      if (!p.pos) continue; const s = project(p.pos.clone().setY(p.pos.y + 6));
+      p.el.style.display = s.vis ? '' : 'none'; if (s.vis) p.el.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
+    }
     if (!showLabels) return;
-    const w = host.clientWidth, h = host.clientHeight;
     for (const it of items.values()) {
       if (!it.label) continue;
       if (!it.anchor) { const b = new THREE.Box3().setFromObject(it.group); if (b.isEmpty()) continue; it.anchor = b.getCenter(new THREE.Vector3()); it.anchor.y = b.max.y + 3; }
-      v.copy(it.anchor); v.project(camera);
-      const vis = v.z < 1 && v.x > -1.1 && v.x < 1.1 && v.y > -1.1 && v.y < 1.1;
-      it.label.style.display = vis ? '' : 'none';
-      if (vis) it.label.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * h}px) translate(-50%, -100%)`;
+      const s = project(it.anchor);
+      it.label.style.display = s.vis ? '' : 'none';
+      if (s.vis) it.label.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
     }
   }
   function liveText(part) {
-    const el = part.el;
+    const el = part.el, cat = catalog[part.type];
     if (part.type === 'wokwi-led') return el.value ? 'MENYALA' : 'padam';
     if (/pushbutton/.test(part.type)) return el.pressed ? 'DITEKAN' : 'dilepas';
-    if (part.type === 'wokwi-potentiometer') return `posisi ${part.attrs?.value ?? '?'} %`;
+    if (part.type === 'wokwi-potentiometer' || part.type === 'wokwi-slide-potentiometer') return `posisi ${part.attrs?.value ?? '?'} %`;
     if (part.type === 'wokwi-servo') return `sudut ${Math.round(el.angle ?? 0)}°`;
-    return '';
+    if (part.type === 'wokwi-slide-switch') return `posisi ${el.value ? 'kanan (2–3)' : 'kiri (1–2)'}`;
+    if (part.type === 'wokwi-analog-joystick') return `X ${(+el.xValue || 0).toFixed(2)} · Y ${(+el.yValue || 0).toFixed(2)}`;
+    if (part.type === 'wokwi-ky-040') return `sudut ${Math.round(el.angle ?? 0)}°`;
+    return L.propSummary(part, cat);
   }
+  const HOW = {
+    button: 'Tekan dan tahan tutup tombol di model untuk menekan.', pot: 'Seret kenop ke kiri / kanan untuk memutar.', joystick: 'Seret tuas ke segala arah; ketuk untuk menekan (SEL).',
+    encoder: 'Seret ke kiri / kanan untuk memutar per klik; ketuk untuk menekan tombolnya.', slide: 'Ketuk saklar untuk memindah posisinya.',
+    sensor: 'Seret sensor ke atas / bawah untuk mengubah nilai utamanya (dan ke kiri / kanan untuk nilai kedua), atau pakai panel Kontrol.',
+    toggle: 'Ketuk sensor untuk memicu / melepas (mis. ada gerakan, ada halangan).', proxy: 'Ketuk tombol / tuts di model seperti pada komponen asli.',
+  };
+  function interactKind(it) {
+    if (!it || it.kind === 'bb') return null; const cat = catalog[it.part.type];
+    if (it.kind === 'button') return 'button'; if (it.kind === 'pot' || it.kind === 'slidepot') return 'pot';
+    if (it.kind === 'joystick') return 'joystick'; if (it.kind === 'encoder') return 'encoder';
+    if (it.part.type === 'wokwi-slide-switch') return 'slide';
+    if (L.dragProps(cat).length) return 'sensor'; if (L.toggleProp(cat)) return 'toggle';
+    return 'proxy';
+  }
+  let infoTab = null;
   function showInfo(id) {
     const part = canvas.parts.get(id); if (!part) return hideInfo();
-    selected = id; const cat = catalog[part.type] || {};
+    selected = id; const cat = catalog[part.type] || {}, it = items.get(id), ik = interactKind(it);
     const conns = canvas.wires.filter((w) => !w.plug && (w.a.startsWith(id + ':') || w.b.startsWith(id + ':')))
       .map((w) => { const [mine, other] = w.a.startsWith(id + ':') ? [w.a, w.b] : [w.b, w.a]; return `<tr><td><span class="sw" style="background:${esc(w.color)}"></span>${esc(mine.slice(id.length + 1))}</td><td>→ ${esc(other)}</td></tr>`; });
     const bb = [...canvas.parts.values()].filter((p) => isBB(p.type) && canvas.pluggedInto(p.id).includes(id)).map((p) => p.id);
+    const ctl = L.controlsHTML(part, cat), mine = issues.filter((x) => x.parts.includes(id));
+    const tabs = [ctl || HOW[ik] ? ['k', 'Kontrol'] : null, ['p', `Pin (${part.pinInfo.length})`], ['c', `Kabel (${conns.length})`]].filter(Boolean);
+    if (!tabs.some((t) => t[0] === infoTab)) infoTab = tabs[0][0];
     const live = liveText(part);
     info.innerHTML = `<button class="v3-x" title="Tutup">✕</button><b>${esc(cat.name || part.type)}</b> <code>${esc(id)}</code>
       ${live ? `<div class="v3-live">Status: <b data-live>${esc(live)}</b></div>` : ''}
       ${bb.length ? `<div class="muted small">Tertancap di ${esc(bb.join(', '))}</div>` : ''}
-      <div class="v3-tabs"><button class="on" data-t="c">Sambungan (${conns.length})</button><button data-t="p">Pin (${part.pinInfo.length})</button></div>
-      <div data-p="c">${conns.length ? `<table>${conns.join('')}</table>` : '<div class="muted small">Belum ada kabel.</div>'}</div>
-      <div data-p="p" hidden><div class="v3-pins">${part.pinInfo.map((p) => `<span>${esc(canvas.pinLabel(part, p))}</span>`).join('')}</div></div>
-      ${/pushbutton/.test(part.type) ? '<div class="muted small">Tekan tutup tombol di model 3D untuk menekan.</div>' : part.type === 'wokwi-potentiometer' ? '<div class="muted small">Seret kenop ke kiri/kanan untuk memutar.</div>' : ''}`;
+      ${mine.map((x) => `<div class="v3-iss ${x.level}">${x.level === 'error' ? '✕' : '!'} ${esc(x.text)}</div>`).join('')}
+      <div class="v3-tabs">${tabs.map(([k, t]) => `<button data-t="${k}" class="${k === infoTab ? 'on' : ''}">${esc(t)}</button>`).join('')}</div>
+      <div data-p="k" ${infoTab === 'k' ? '' : 'hidden'}>${HOW[ik] ? `<div class="v3-how">${esc(HOW[ik])}</div>` : ''}${ctl}</div>
+      <div data-p="p" ${infoTab === 'p' ? '' : 'hidden'}><table class="v3-ptab"><thead><tr><th>Pin</th><th>Ukur</th><th></th></tr></thead><tbody>${part.pinInfo.map((p) => `<tr data-ref="${esc(id + ':' + p.name)}" title="Ketuk untuk memasang probe multimeter"><td>${esc(canvas.pinLabel(part, p))}</td><td data-r></td><td class="muted" data-s></td></tr>`).join('')}</tbody></table>
+        <div class="muted small">Ketuk baris untuk memasang probe multimeter pada pin.</div></div>
+      <div data-p="c" ${infoTab === 'c' ? '' : 'hidden'}>${conns.length ? `<table>${conns.join('')}</table>` : '<div class="muted small">Belum ada kabel.</div>'}</div>`;
     info.hidden = false;
     info.querySelector('.v3-x').onclick = hideInfo;
-    info.querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => { info.querySelectorAll('[data-t]').forEach((x) => x.classList.toggle('on', x === b)); info.querySelectorAll('[data-p]').forEach((p) => (p.hidden = p.dataset.p !== b.dataset.t)); }));
-    for (const it of items.values()) it.label?.classList.toggle('sel', it.part.id === id);
+    info.querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => { infoTab = b.dataset.t; info.querySelectorAll('[data-t]').forEach((x) => x.classList.toggle('on', x === b)); info.querySelectorAll('[data-p]').forEach((p) => (p.hidden = p.dataset.p !== infoTab)); syncInfo(true); }));
+    info.querySelectorAll('[data-k]').forEach((inp) => {
+      const p = cat.props.find((x) => x.key === inp.dataset.k);
+      if (inp.tagName === 'BUTTON') inp.onclick = () => { setAttr(part, p.key, !part.attrs[p.key], true); flash(part.id, `${p.label}: ${part.attrs[p.key] ? 'ya' : 'tidak'}`); };
+      else inp.oninput = inp.onchange = (ev) => setAttr(part, p.key, p.type === 'range' ? +inp.value : inp.value, ev.type === 'change');
+    });
+    info.querySelectorAll('tr[data-ref]').forEach((tr) => (tr.onclick = () => toggleProbe(tr.dataset.ref)));
+    for (const x of items.values()) x.label?.classList.toggle('sel', x.part.id === id);
+    syncInfo(true);
+  }
+  /** live values in the open info card */
+  function syncInfo(force) {
+    if (!selected || info.hidden) return; const part = canvas.parts.get(selected); if (!part) return;
+    const lv = info.querySelector('[data-live]'); if (lv) lv.textContent = liveText(part);
+    const cat = catalog[part.type] || {};
+    for (const inp of info.querySelectorAll('input[data-k]')) {
+      const p = cat.props.find((x) => x.key === inp.dataset.k); const val = part.attrs[p.key] ?? p.def;
+      if (document.activeElement !== inp && +inp.value !== +val) inp.value = val;
+      const o = info.querySelector(`[data-out="${p.key}"]`); if (o) o.textContent = L.fmtProp(p, val);
+    }
+    for (const b of info.querySelectorAll('button[data-k]')) { const on = !!part.attrs[b.dataset.k]; b.classList.toggle('on', on); b.textContent = on ? 'Ya' : 'Tidak'; }
+    if (infoTab === 'p' || force) {
+      const st = L.staticCircuit(canvas);
+      for (const tr of info.querySelectorAll('tr[data-ref]')) {
+        const r = L.readPin(sim, canvas, tr.dataset.ref, st);
+        tr.className = 'lvl-' + r.level + (probes.some((p) => p.ref === r.ref) ? ' probed' : '');
+        tr.querySelector('[data-r]').textContent = r.volts !== null ? r.volts.toFixed(2) + ' V' : r.live ? r.state : (r.peers.length || r.viaBB ? '·' : '—');
+        tr.querySelector('[data-s]').textContent = r.volts !== null ? r.state + (r.mode ? ' · ' + r.mode : '') : r.live ? '' : (r.peers[0] || (r.viaBB ? 'breadboard' : ''));
+        tr.title = (r.detail ? r.detail + '\n' : '') + (r.peers.length ? 'Tersambung ke: ' + r.peers.join(', ') : '') + (r.viaBB ? ' (lewat breadboard)' : '');
+      }
+    }
   }
   function hideInfo() { selected = null; info.hidden = true; for (const it of items.values()) it.label?.classList.remove('sel'); }
+
+  // ---------------------------------------------------------------- sensor values & gestures
+  function setAttr(part, key, val, commit) {
+    part.attrs[key] = val; canvas.applyAttrs(part);
+    try { onAttr?.(part, key, commit); } catch { /* host hook */ }
+    sim.resolveNow?.(); updateLabel(part.id);
+    const p = catalog[part.type]?.props?.find((x) => x.key === key);
+    if (commit && p && p.type === 'select') schedule();                       // e.g. LED colour: rebuild the model
+  }
+  let flashT = 0;
+  function flash(id, text, x, y) {
+    const it = items.get(id); let s = null;
+    if (x == null && it) { if (!it.anchor) { const b = new THREE.Box3().setFromObject(it.group); it.anchor = b.getCenter(new THREE.Vector3()); it.anchor.y = b.max.y + 3; } s = project(it.anchor); }
+    hudEl.textContent = text; hudEl.hidden = false;
+    hudEl.style.transform = `translate(${x ?? s?.x ?? host.clientWidth / 2}px, ${(y ?? s?.y ?? 80) - 26}px) translate(-50%, -100%)`;
+    clearTimeout(flashT); flashT = setTimeout(() => { hudEl.hidden = true; }, 1300);
+  }
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const snapStep = (x, p) => { const s = +p.step || 1; return clamp(Math.round((x - p.min) / s) * s + +p.min, +p.min, +p.max); };
+
+  /** forward a tap on the 3D model to the matching spot of the 2D element (keypad keys, DIP switches, IR remote …) */
+  function proxyClick(it, point) {
+    if (!it || it.standing || it.kind === 'bb') return false;
+    const part = it.part, l = it.group.worldToLocal(point.clone()), ux = l.x / MM, uy = l.z / MM;
+    const z = canvas.zoom || 1, er = hostRect(part), cx = er.left + er.width / 2, cy = er.top + er.height / 2;
+    const k = part.rot & 3, c = [1, 0, -1, 0][k], s = [0, 1, 0, -1][k];
+    const X = cx + (c * ux - s * uy) * z, Y = cy + (s * ux + c * uy) * z;
+    const rootEl = part.el.shadowRoot || part.el; let best = null, ba = Infinity, bp = null, bpa = Infinity;
+    for (const n of rootEl.querySelectorAll('*')) {
+      if (/^(style|defs|title|desc)$/i.test(n.tagName)) continue;
+      const r = n.getBoundingClientRect(); if (!r.width || !r.height || X < r.left || X > r.right || Y < r.top || Y > r.bottom) continue;
+      const a = r.width * r.height; if (a < ba) { ba = a; best = n; }
+      let cur = ''; try { cur = getComputedStyle(n).cursor; } catch { /* svg */ }
+      if (cur === 'pointer' && a < bpa) { bpa = a; bp = n; }
+    }
+    const t = bp || best; if (!t) return false;
+    const o = { bubbles: true, composed: true, cancelable: true, clientX: X, clientY: Y, button: 0, view: window };
+    t.dispatchEvent(new MouseEvent('mousedown', o));
+    setTimeout(() => { t.dispatchEvent(new MouseEvent('mouseup', o)); t.dispatchEvent(new MouseEvent('click', o)); sim.resolveNow?.(); }, 160);
+    sim.resolveNow?.();
+    return true;
+  }
+
+  // ---------------------------------------------------------------- multimeter
+  function pinWorld(part, info) {
+    if (isBB(part.type)) { const q = canvas._xf(part, info.x, info.y); return new THREE.Vector3((part.left + q.x) * MM, BB_H, (part.top + q.y) * MM); }
+    return contactOf(`${part.id}:${info.name}`);
+  }
+  /** nearest pin to a ray hit (part body, breadboard hole or the end of a wire) */
+  function nearestPin(h, e) {
+    if (!h) return null;
+    if (h.wire) {
+      const w = canvas.wires.find((x) => x.id === h.wire); if (!w) return null;
+      const A = contactOf(w.a), B = contactOf(w.b); if (!A || !B) return null;
+      return A.distanceTo(h.point) <= B.distanceTo(h.point) ? { ref: w.a, pos: A } : { ref: w.b, pos: B };
+    }
+    const part = canvas.parts.get(h.id); if (!part) return null;
+    // pins under the cursor on screen (works for upright modules whose legs hide below the body), else nearest in 3D
+    const r = glCanvas.getBoundingClientRect(), cx = e ? e.clientX - r.left : null, cy = e ? e.clientY - r.top : null;
+    let best = null, bd = Infinity;
+    for (const p of part.pinInfo) {
+      const c = pinWorld(part, p); if (!c) continue;
+      let d;
+      if (e) { const s = project(c); d = Math.hypot(s.x - cx, s.y - cy) / 4; }
+      else d = Math.hypot(c.x - h.point.x, c.z - h.point.z) + 0.25 * Math.abs(c.y - h.point.y);
+      if (d < bd) { bd = d; best = { ref: `${part.id}:${p.name}`, pos: c }; }
+    }
+    if (!best || bd > (isBB(part.type) ? (e ? 2.5 : 1.8) : (e ? 4 : 4.5))) return null;
+    if (isBB(part.type)) { const pw = canvas.wires.find((w) => w.plug && w.b === best.ref); if (pw) return { ref: pw.a, pos: best.pos }; }   // a leg in this hole: name the part's pin
+    return best;
+  }
+  function probeMesh(color) {
+    const g = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.35, metalness: 0.1 });
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.6, 14), new THREE.MeshStandardMaterial({ color: 0xd0d0d0, metalness: 0.9, roughness: 0.25 })); tip.rotation.x = Math.PI; tip.position.y = 1.3; g.add(tip);
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.75, 9, 18), m); grip.position.y = 7.1; g.add(grip);
+    const guard = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.7, 18), m); guard.position.y = 2.9; g.add(guard);
+    g.traverse((o) => { o.castShadow = true; }); return g;
+  }
+  function toggleProbe(ref) {
+    if (!ref) return;
+    const i = probes.findIndex((p) => p.ref === ref);
+    if (i >= 0) { const [p] = probes.splice(i, 1); labGroup.remove(p.mesh); disposeObj(p.mesh); p.el.remove(); }
+    else {
+      if (probes.length >= 6) { const [p] = probes.splice(0, 1); labGroup.remove(p.mesh); disposeObj(p.mesh); p.el.remove(); }
+      const used = new Set(probes.map((p) => p.color)), color = PROBE_COLORS.find((c) => !used.has(c)) || PROBE_COLORS[0];
+      const el = document.createElement('div'); el.className = 'v3-plabel'; el.style.setProperty('--c', color); labelsEl.append(el);
+      const p = { ref, color, mesh: probeMesh(color), el }; labGroup.add(p.mesh); probes.push(p); placeProbe(p);
+    }
+    if (!probeMode && probes.length) setProbeMode(true, true);
+    renderMeter(); syncInfo(true);
+  }
+  function placeProbe(p) {
+    const [pid] = [p.ref.slice(0, p.ref.lastIndexOf(':'))], part = canvas.parts.get(pid), inf = part?.pinInfo.find((x) => x.name === p.ref.slice(p.ref.lastIndexOf(':') + 1));
+    p.pos = part && inf ? pinWorld(part, inf) : null; p.mesh.visible = !!p.pos; if (p.pos) p.mesh.position.copy(p.pos);
+  }
+  function renderMeter() {
+    meterEl.hidden = !probeMode; host.classList.toggle('v3-has-side', probeMode || diagOpen);
+    if (!probeMode) return;
+    const st = L.staticCircuit(canvas), rs = probes.map((p) => ({ p, r: L.readPin(sim, canvas, p.ref, st) }));
+    for (const { p, r } of rs) { p.el.textContent = r.volts !== null ? r.volts.toFixed(2) + ' V' : r.live ? r.state : '?'; p.el.classList.toggle('bad', r.level === 'err' || r.level === 'warn'); }
+    const a = rs[0]?.r, b = rs[1]?.r, diff = a && b && a.volts !== null && b.volts !== null ? a.volts - b.volts : null;
+    meterEl.innerHTML = `<header><b>Multimeter</b><span class="muted">${sim.running ? 'diukur terhadap GND' : 'simulasi berhenti'}</span><button class="v3-x" data-m="close" title="Tutup multimeter">✕</button></header>
+      ${rs.length ? rs.map(({ p, r }) => `<div class="v3-mrow lvl-${r.level}" data-ref="${esc(p.ref)}"><i style="background:${p.color}"></i><span class="n">${esc(r.label)}</span><b>${r.volts !== null ? r.volts.toFixed(2) + ' V' : '—'}</b><em>${esc(r.state)}${r.mode ? ' · ' + esc(r.mode) : ''}</em><button class="v3-x" data-rm="${esc(p.ref)}" title="Lepas probe">✕</button>
+        ${r.detail ? `<div class="d">${esc(r.detail)}</div>` : ''}${r.peers.length || r.viaBB ? `<div class="d muted">Tersambung ke ${esc(r.peers.slice(0, 6).join(', '))}${r.peers.length > 6 ? ' …' : ''}${r.viaBB ? (r.peers.length ? ' (lewat breadboard)' : 'breadboard saja') : ''}</div>` : r.level !== 'idle' || r.live ? '<div class="d muted">Tidak tersambung ke komponen lain.</div>' : ''}</div>`).join('')
+        : '<div class="muted small">Ketuk pin, lubang breadboard, atau ujung kabel pada model untuk memasang probe. Ketuk lagi untuk melepas.</div>'}
+      ${diff !== null ? `<div class="v3-diff">Beda tegangan ${esc(rs[0].r.label)} − ${esc(rs[1].r.label)}: <b>${diff.toFixed(2)} V</b></div>` : ''}
+      ${rs.length ? '<button class="btn small" data-m="clear">Lepas semua probe</button>' : ''}`;
+    meterEl.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); toggleProbe(b.dataset.rm); }));
+    meterEl.querySelector('[data-m=close]').onclick = () => setProbeMode(false);
+    const cl = meterEl.querySelector('[data-m=clear]'); if (cl) cl.onclick = () => { while (probes.length) toggleProbe(probes[0].ref); };
+    meterEl.querySelectorAll('.v3-mrow').forEach((row) => (row.onclick = () => { const id = row.dataset.ref.slice(0, row.dataset.ref.lastIndexOf(':')); focusPart(id); showInfo(id); }));
+  }
+  function setProbeMode(on, keepProbes) {
+    probeMode = on; host.classList.toggle('v3-probing', on);
+    host.querySelector('[data-v=probe]')?.classList.toggle('on', on);
+    if (!on && !keepProbes) while (probes.length) { const p = probes.pop(); labGroup.remove(p.mesh); disposeObj(p.mesh); p.el.remove(); }
+    if (hoverMarker) hoverMarker.visible = false; tipEl.hidden = true;
+    renderMeter();
+  }
+  function hoverProbe(e, hitFn) {
+    const h = hitFn(e, true), np = nearestPin(h, e);
+    if (!np) { hoverMarker.visible = false; tipEl.hidden = true; glCanvas.style.cursor = ''; return; }
+    hoverMarker.position.copy(np.pos); hoverMarker.visible = true; glCanvas.style.cursor = 'crosshair';
+    const r = L.readPin(sim, canvas, np.ref), rr = host.getBoundingClientRect();
+    tipEl.innerHTML = `<b>${esc(r.label)}</b> ${esc(L.readingText(r))}${r.mode ? ` <span class="muted">${esc(r.mode)}</span>` : ''}${r.detail ? `<div>${esc(r.detail)}</div>` : ''}${r.peers.length ? `<div class="muted">→ ${esc(r.peers.slice(0, 4).join(', '))}${r.peers.length > 4 ? ' …' : ''}</div>` : ''}`;
+    tipEl.className = 'v3-tip lvl-' + r.level; tipEl.hidden = false;
+    tipEl.style.transform = `translate(${Math.min(rr.width - 250, e.clientX - rr.left + 14)}px, ${e.clientY - rr.top + 14}px)`;
+  }
+
+  // ---------------------------------------------------------------- diagnosis
+  const halos = [];
+  function refreshIssues() {
+    if (!renderer) return;
+    let res = []; try { res = check?.() || []; } catch { res = []; }
+    issues = L.collectIssues({ checkRes: res, runtime: runtimeLog, sim, canvas });
+    worst = new Map();
+    for (const x of issues) for (const id of x.parts) if (worst.get(id) !== 'error') worst.set(id, x.level);
+    for (const it of items.values()) if (it.label) { it.label.classList.toggle('err', worst.get(it.part.id) === 'error'); it.label.classList.toggle('warn', worst.get(it.part.id) === 'warn'); }
+    const nErr = issues.filter((x) => x.level === 'error').length, cnt = host.querySelector('.v3-cnt');
+    cnt.hidden = !issues.length; cnt.textContent = issues.length; cnt.classList.toggle('err', nErr > 0);
+    renderDiag(); drawHalos();
+  }
+  function drawHalos() {
+    for (const h of halos.splice(0)) { labGroup.remove(h); h.geometry.dispose(); h.material.dispose(); }
+    if (!diagOpen) return;
+    for (const [id, lvl] of worst) {
+      const it = items.get(id); if (!it) continue;
+      const b = new THREE.Box3().setFromObject(it.group); if (b.isEmpty()) continue; b.expandByScalar(1.6);
+      const hb = new THREE.Box3Helper(b, new THREE.Color(lvl === 'error' ? 0xe53935 : 0xf5a524)); hb.material.transparent = true; hb.material.depthTest = false; hb.renderOrder = 5; hb.userData.lvl = lvl;
+      labGroup.add(hb); halos.push(hb);
+    }
+  }
+  function renderDiag() {
+    diagEl.hidden = !diagOpen; host.classList.toggle('v3-has-side', probeMode || diagOpen); if (!diagOpen) return;
+    const nE = issues.filter((x) => x.level === 'error').length, nW = issues.length - nE;
+    const src = { cek: 'cek rangkaian', sim: 'simulasi', ukur: 'pengukuran' };
+    diagEl.innerHTML = `<header><b>Diagnosa</b><span class="muted">${issues.length ? `${nE} galat · ${nW} peringatan` : 'tidak ada masalah'}</span><button class="v3-x" data-d="close" title="Tutup">✕</button></header>
+      ${issues.length ? issues.map((x, i) => `<div class="v3-di ${x.level}" data-i="${i}" title="${x.parts.length ? 'Ketuk untuk melihat komponennya' : ''}"><span class="ic">${x.level === 'error' ? '✕' : '!'}</span><span>${esc(x.text)}<small>${esc(src[x.src] || '')}${x.parts.length ? ' · ' + esc(x.parts.join(', ')) : ''}</small></span></div>`).join('')
+        : `<div class="v3-ok">✓ Tidak ditemukan kesalahan wiring.${sim.running ? ' Daya semua komponen terukur normal.' : ' Jalankan simulasi agar daya tiap komponen ikut diukur.'}</div>`}
+      <div class="v3-dfoot"><button class="btn small" data-d="re">Periksa ulang</button>${sim.running ? '' : '<span class="muted small">Tips: jalankan simulasi lalu buka Ukur untuk mengecek tegangan tiap pin.</span>'}</div>`;
+    diagEl.querySelector('[data-d=close]').onclick = () => setDiag(false);
+    diagEl.querySelector('[data-d=re]').onclick = () => { refreshIssues(); toast?.('Rangkaian diperiksa ulang.'); };
+    diagEl.querySelectorAll('[data-i]').forEach((d) => (d.onclick = () => {
+      const x = issues[+d.dataset.i]; if (!x?.parts.length) return; focusPart(x.parts[0]); showInfo(x.parts[0]);
+      if (x.pin && !probes.some((p) => p.ref === x.pin)) toggleProbe(x.pin);
+    }));
+  }
+  function setDiag(on) { diagOpen = on; host.querySelector('[data-v=diag]')?.classList.toggle('on', on); refreshIssues(); }
 
   // ---------------------------------------------------------------- picking & direct interaction
   function bindPointer() {
     const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
-    let down = null, act = null;
-    const hit = (e) => {
+    let down = null, act = null, hoverQ = false;
+    const hit = (e, withWires) => {
       const r = glCanvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, camera);
-      const hs = ray.intersectObjects(root.children, true);
-      for (const h of hs) { let o = h.object; while (o && !o.userData.partId) o = o.parent; if (o) return { id: o.userData.partId, obj: h.object, point: h.point }; }
+      const hs = ray.intersectObjects(withWires ? [...root.children, ...wiresGroup.children] : root.children, true);
+      for (const h of hs) {
+        if (h.object.userData.wire) return { wire: h.object.userData.wire, obj: h.object, point: h.point };
+        let o = h.object; while (o && !o.userData.partId) o = o.parent; if (o) return { id: o.userData.partId, obj: h.object, point: h.point };
+      }
       return null;
     };
+    api._hit = hit;
+    const cap = (e) => { try { glCanvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ } };
     glCanvas.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       down = { x: e.clientX, y: e.clientY, t: performance.now() };
+      if (probeMode) return;                                          // multimeter: taps only, the view still orbits
       const h = hit(e); if (!h) return;
-      const it = items.get(h.id); if (!it) return;
-      if (it.kind === 'button' && sim) {
-        controls.enabled = false; act = { kind: 'button', it };
-        it.part.el.pressed = true; it.part.el.dispatchEvent(new Event('button-press'));
-        try { glCanvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
-      } else if (it.kind === 'pot' || it.kind === 'slidepot') {
-        controls.enabled = false; act = { kind: 'pot', it, x: e.clientX, v0: +it.part.el.value || 0 };
-        try { glCanvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+      const it = items.get(h.id); if (!it) return; const el = it.part.el, ik = interactKind(it);
+      if (ik === 'button') { controls.enabled = false; act = { kind: 'button', it }; el.pressed = true; el.dispatchEvent(new Event('button-press')); sim.resolveNow?.(); cap(e); }
+      else if (ik === 'pot') { controls.enabled = false; act = { kind: 'pot', it, x: e.clientX, v0: +el.value || 0 }; cap(e); }
+      else if (ik === 'joystick') { controls.enabled = false; act = { kind: 'joy', it, x: e.clientX, y: e.clientY }; cap(e); }
+      else if (ik === 'encoder') { controls.enabled = false; act = { kind: 'enc', it, x: e.clientX, acc: 0 }; cap(e); }
+      else if (ik === 'sensor') {
+        const ps = L.dragProps(catalog[it.part.type]);
+        controls.enabled = false; act = { kind: 'sensor', it, ps, x: e.clientX, y: e.clientY, v0: ps.map((p) => +(it.part.attrs[p.key] ?? p.def)) }; cap(e);
       }
     }, true);
     glCanvas.addEventListener('pointermove', (e) => {
-      if (act?.kind === 'pot') {
-        const el = act.it.part.el, mn = el.min ?? 0, mx = el.max ?? (act.it.kind === 'slidepot' ? 100 : 1023);
+      if (!act) {
+        if (probeMode && !e.buttons && !hoverQ) { hoverQ = true; requestAnimationFrame(() => { hoverQ = false; hoverProbe(e, hit); }); }
+        return;
+      }
+      const dx = e.clientX - (act.x ?? e.clientX), dy = e.clientY - (act.y ?? e.clientY);
+      if (Math.hypot(dx, dy) > 4) act.moved = true;
+      const el = act.it.part.el, rr = host.getBoundingClientRect(), hx = e.clientX - rr.left, hy = e.clientY - rr.top;
+      if (act.kind === 'pot') {
+        const mn = el.min ?? 0, mx = el.max ?? (act.it.kind === 'slidepot' ? 100 : 1023);
         el.value = Math.round(Math.min(mx, Math.max(mn, act.v0 + ((e.clientX - act.x) / 220) * (mx - mn))));
-        el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        el.dispatchEvent(new InputEvent('input', { bubbles: true })); sim.resolveNow?.();
+        flash(act.it.part.id, `${act.it.part.id}: ${act.it.part.attrs.value ?? Math.round(((el.value - mn) / (mx - mn)) * 100)} %`, hx, hy);
+      } else if (act.kind === 'joy' && act.moved) {
+        el.xValue = clamp(-dx / 55, -1, 1); el.yValue = clamp(-dy / 55, -1, 1);               // element convention: left / up = +1
+        el.dispatchEvent(new InputEvent('input')); sim.resolveNow?.();
+        flash(act.it.part.id, `X ${(-el.xValue).toFixed(2)} · Y ${el.yValue.toFixed(2)}`, hx, hy);
+      } else if (act.kind === 'enc') {
+        const steps = Math.trunc(dx / 22); act.done ||= 0;
+        while (act.done !== steps) {
+          const cw = steps > act.done; act.done += cw ? 1 : -1; act.moved = true;
+          el.angle = ((el.angle || 0) + (cw ? 1 : -1) * (el.stepSize || 18) + 360) % 360;
+          el.dispatchEvent(new InputEvent(cw ? 'rotate-cw' : 'rotate-ccw'));
+          flash(act.it.part.id, cw ? '↻ putar kanan' : '↺ putar kiri', hx, hy);
+        }
+      } else if (act.kind === 'sensor' && act.moved) {
+        const txt = [];
+        act.ps.forEach((p, i) => {
+          const d = i === 0 ? -dy : dx, span = (+p.max - +p.min);
+          const nv = snapStep(act.v0[i] + (d / 240) * span, p);
+          if (nv !== +act.it.part.attrs[p.key]) setAttr(act.it.part, p.key, nv, false);
+          txt.push(`${p.label} ${L.fmtProp(p, act.it.part.attrs[p.key])}`);
+        });
+        flash(act.it.part.id, txt.join(' · '), hx, hy);
       }
     });
     const up = (e) => {
-      if (act?.kind === 'button') { act.it.part.el.pressed = false; act.it.part.el.dispatchEvent(new Event('button-release')); }
-      const wasAct = !!act; act = null; controls.enabled = true;
-      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6 && performance.now() - down.t < 600) {
-        const h = hit(e); if (h) showInfo(h.id); else if (!wasAct) hideInfo();
-      } else if (wasAct && selected) showInfo(selected);
+      const a = act; act = null; controls.enabled = true;
+      if (a?.kind === 'button') { a.it.part.el.pressed = false; a.it.part.el.dispatchEvent(new Event('button-release')); sim.resolveNow?.(); }
+      if (a?.kind === 'joy') {
+        const el = a.it.part.el;
+        if (!a.moved) { el.dispatchEvent(new Event('button-press')); sim.resolveNow?.(); setTimeout(() => { el.dispatchEvent(new Event('button-release')); sim.resolveNow?.(); }, 180); flash(a.it.part.id, 'SEL ditekan'); }
+        else { el.xValue = 0; el.yValue = 0; el.dispatchEvent(new InputEvent('input')); sim.resolveNow?.(); }
+      }
+      if (a?.kind === 'enc' && !a.moved) { const el = a.it.part.el; el.dispatchEvent(new Event('button-press')); sim.resolveNow?.(); setTimeout(() => { el.dispatchEvent(new Event('button-release')); sim.resolveNow?.(); }, 180); flash(a.it.part.id, 'tombol encoder ditekan'); }
+      if (a?.kind === 'sensor' && a.moved) { try { onAttr?.(a.it.part, a.ps[0].key, true); } catch { /* hook */ } }
+      if (a?.kind === 'pot' && a.moved !== false) { try { onAttr?.(a.it.part, 'value', true); } catch { /* hook */ } }
+      const tap = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6 && performance.now() - down.t < 600;
+      if (tap) {
+        if (probeMode) { const np = nearestPin(hit(e, true), e); if (np) toggleProbe(np.ref); else { const h = hit(e); if (h) showInfo(h.id); } }
+        else {
+          const h = hit(e);
+          if (h) {
+            const it = items.get(h.id), ik = interactKind(it);
+            if (!a && ik === 'slide') { const el = it.part.el; el.value = el.value ? 0 : 1; el.dispatchEvent(new InputEvent('input', { detail: el.value })); sim.resolveNow?.(); flash(h.id, el.value ? 'saklar → posisi 2–3' : 'saklar → posisi 1–2'); }
+            else if (!a && ik === 'toggle') { const p = L.toggleProp(catalog[it.part.type]); setAttr(it.part, p.key, !it.part.attrs[p.key], true); flash(h.id, `${p.label}: ${it.part.attrs[p.key] ? 'YA' : 'tidak'}`); }
+            else if (!a && ik === 'proxy') proxyClick(it, h.point);
+            showInfo(h.id);
+          } else if (!a) hideInfo();
+        }
+      } else if (a?.it && a.moved) { if (selected === a.it.part.id) syncInfo(); else showInfo(a.it.part.id); }
+      else if (a && selected) syncInfo();
       down = null;
     };
     glCanvas.addEventListener('pointerup', up); glCanvas.addEventListener('pointercancel', up);
+    glCanvas.addEventListener('pointerleave', () => { if (!act) { tipEl.hidden = true; if (hoverMarker) hoverMarker.visible = false; } });
   }
 
   // ---------------------------------------------------------------- camera tools
@@ -425,6 +724,12 @@ export function init3D({ canvas, sim, host, catalog }) {
     const R = Math.max(sz.x, sz.z * 1.2, 40), d = (R / 2) / Math.tan((camera.fov * Math.PI) / 360) * 1.25 / Math.min(1, camera.aspect) ;
     const dir = kind === 'top' ? new THREE.Vector3(0, 1, 0.0001) : kind === 'front' ? new THREE.Vector3(0, 0.42, 1) : new THREE.Vector3(-0.62, 0.95, 0.85);
     controls.target.copy(c); camera.position.copy(c).add(dir.normalize().multiplyScalar(d)); camera.updateProjectionMatrix(); controls.update();
+  }
+  function focusPart(id) {
+    const it = items.get(id); if (!it) return;
+    const b = new THREE.Box3().setFromObject(it.group), c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
+    const R = Math.max(70, Math.max(sz.x, sz.z) * 3), dir = camera.position.clone().sub(controls.target).normalize();
+    anim = { t0: performance.now(), ft: controls.target.clone(), fp: camera.position.clone(), tt: c, tp: c.clone().add(dir.multiplyScalar(R)) };
   }
   function orbit(deg) { const o = camera.position.clone().sub(controls.target); o.applyAxisAngle(new THREE.Vector3(0, 1, 0), (deg * Math.PI) / 180); camera.position.copy(controls.target).add(o); controls.update(); }
   function dolly(f) { const o = camera.position.clone().sub(controls.target).multiplyScalar(f); camera.position.copy(controls.target).add(o); controls.update(); }
@@ -437,12 +742,14 @@ export function init3D({ canvas, sim, host, catalog }) {
     if (t === 'rotl') orbit(-45); else if (t === 'rotr') orbit(45);
     else if (t === 'zin') dolly(0.8); else if (t === 'zout') dolly(1.25);
     else if (t === 'iso' || t === 'top' || t === 'front') view(t);
-    else if (t === 'labels') { showLabels = !showLabels; btn?.classList.toggle('on', showLabels); labelsEl.hidden = !showLabels; }
+    else if (t === 'labels') { showLabels = !showLabels; btn?.classList.toggle('on', showLabels); for (const it of items.values()) if (it.label) it.label.hidden = !showLabels; }
+    else if (t === 'probe') { setProbeMode(!probeMode); if (probeMode) toast?.(sim.running ? 'Multimeter aktif: ketuk pin untuk mengukur.' : 'Multimeter aktif. Jalankan simulasi (▶) agar tegangan terukur.'); }
+    else if (t === 'diag') setDiag(!diagOpen);
     else if (t === 'close') api.close();
   }
   function onKey(e) {
     if (!open || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable || e.ctrlKey || e.metaKey || e.altKey) return;
-    const k = e.key.toLowerCase(), map = { q: () => orbit(-15), e: () => orbit(15), w: () => panBy(0, 1), s: () => panBy(0, -1), a: () => panBy(-1, 0), d: () => panBy(1, 0), '+': () => dolly(0.85), '=': () => dolly(0.85), '-': () => dolly(1.18), r: () => view('iso'), t: () => view('top'), f: () => view('front'), l: () => tool('labels', host.querySelector('[data-v=labels]')), escape: () => api.close() };
+    const k = e.key.toLowerCase(), map = { q: () => orbit(-15), e: () => orbit(15), w: () => panBy(0, 1), s: () => panBy(0, -1), a: () => panBy(-1, 0), d: () => panBy(1, 0), '+': () => dolly(0.85), '=': () => dolly(0.85), '-': () => dolly(1.18), r: () => view('iso'), t: () => view('top'), f: () => view('front'), l: () => tool('labels', host.querySelector('[data-v=labels]')), m: () => tool('probe'), g: () => tool('diag'), escape: () => (probeMode ? setProbeMode(false) : api.close()) };
     if (map[k]) { e.preventDefault(); map[k](); }
     if (!e.ctrlKey && !e.metaKey) e.stopImmediatePropagation();          // 2D shortcuts (R, Del, B …) stay inactive while the 3D view is open
   }
@@ -450,8 +757,27 @@ export function init3D({ canvas, sim, host, catalog }) {
   function loop() {
     raf = requestAnimationFrame(loop);
     const now = performance.now();
+    if (anim) {
+      const t = Math.min(1, (now - anim.t0) / 450), k = t * t * (3 - 2 * t);
+      controls.target.lerpVectors(anim.ft, anim.tt, k); camera.position.lerpVectors(anim.fp, anim.tp, k); if (t >= 1) anim = null;
+    }
     liveUpdate(now); controls.update(); renderer.render(scene, camera); placeLabels();
-    if (selected && info.querySelector('[data-live]')) { const p = canvas.parts.get(selected); if (p) info.querySelector('[data-live]').textContent = liveText(p); }
+    for (const h of halos) h.material.opacity = 0.45 + 0.55 * Math.abs(Math.sin(now / 380));
+    if (now - lastSlow > 280) {                                       // live readings (multimeter, card, labels)
+      lastSlow = now; syncInfo(); if (probeMode) renderMeterLive();
+      for (const it of items.values()) if (it.label) updateLabel(it.part.id);
+      if (now - (api._issT || 0) > 1500) { api._issT = now; refreshIssues(); }
+    }
+  }
+  /** cheap meter refresh: rebuild only when the readings changed */
+  let meterKey = '';
+  function renderMeterLive() {
+    const st = L.staticCircuit(canvas), key = probes.map((p) => { const r = L.readPin(sim, canvas, p.ref, st); return p.ref + (r.volts?.toFixed(2) ?? r.state) + r.level; }).join('|') + sim.running;
+    if (key !== meterKey) { meterKey = key; renderMeter(); }
+  }
+  function afterBuild() {
+    for (const p of probes) placeProbe(p);
+    refreshIssues();
   }
 
   const api = {
@@ -459,17 +785,17 @@ export function init3D({ canvas, sim, host, catalog }) {
     open() {
       if (!renderer) setup();
       open = true; host.hidden = false; resize(); build(); view('iso');
-      const help = host.querySelector('.v3-help'); help.classList.remove('fade'); clearTimeout(api._helpT); api._helpT = setTimeout(() => help.classList.add('fade'), 9000);
+      const help = host.querySelector('.v3-help'); help.classList.remove('fade'); clearTimeout(api._helpT); api._helpT = setTimeout(() => help.classList.add('fade'), 12000);
       cancelAnimationFrame(raf); loop();
       api.onToggle?.(true);
     },
     close() {
-      open = false; host.hidden = true; cancelAnimationFrame(raf); raf = 0; hideInfo();
+      open = false; host.hidden = true; cancelAnimationFrame(raf); raf = 0; hideInfo(); tipEl.hidden = true; hudEl.hidden = true;
       for (const it of items.values()) it.obs?.disconnect();
       api.onToggle?.(false);
     },
     toggle() { return open ? api.close() : api.open(); },
-    _debug: () => ({ items, scene, camera, controls, renderer, build, view, showInfo, info }),
+    _debug: () => ({ items, scene, camera, controls, renderer, build, view, showInfo, info, probes, toggleProbe, setProbeMode, setDiag, get issues() { return issues; }, refreshIssues, focusPart, get animating() { return !!anim; }, proxyClick, nearestPin, interactKind, project, contactOf }),
   };
   return api;
 }
