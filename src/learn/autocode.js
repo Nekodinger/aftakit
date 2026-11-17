@@ -25,7 +25,7 @@ export function readCircuit(canvas, catalog) {
     for (const r of resistors) for (const [x, y] of [['1', '2'], ['2', '1']]) if (find(`${r.id}:${x}`) === r0) { const m = mcuRoot.get(find(`${r.id}:${y}`)); if (m) return m; }
     return null;
   };
-  const items = comps.filter((p) => p.type !== 'wokwi-resistor').map((p) => {
+  const items = comps.filter((p) => !/^(wokwi-resistor|mod-resistor|wokwi-capacitor|mod-capacitor|mod-diode)$/.test(p.type)).map((p) => {
     const pins = {}, allPins = p.pinInfo.map((i) => base(i.name)), conn = {};
     for (const i of p.pinInfo) {
       const m = st.where.get(`${p.id}:${i.name}`) || throughR(`${p.id}:${i.name}`); if (!m) continue;

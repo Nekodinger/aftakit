@@ -50,12 +50,15 @@ export function mcuPinInfo(part, info, cat) {
 }
 
 // ---------------------------------------------------------------- component pin roles (for "Otomatis")
-const FIVE_V = /sr04|servo|relay|mq|lcd1602|lcd2004|l298|stepper|pir|esc|motor|ultrasonic|neopixel|ws2812|hx711|sound|soil|water|ph|tds|flame/i;
+const FIVE_V = /sr04|servo|relay|mq|gas-sensor|lcd1602|lcd2004|l298|stepper|pir|esc|motor|ultrasonic|neopixel|led-ring|ws2812|hx711|sound|soil|water|ph|tds|flame/i;
 function compRole(part, info) {
   const n = info.name, B = base(n).replace(/[^A-Z0-9+\-]/g, ''), sig = info.signals || [], names = new Set(part.pinInfo.map((p) => base(p.name)));
   const t = part.type;
   if (/pushbutton/.test(t)) return n === '1.l' ? { role: 'digital' } : n === '2.l' ? { role: 'gnd' } : { role: 'skip' };
   if (/^wokwi-(resistor|capacitor)|mod-(resistor|capacitor|diode)/.test(t)) return { role: 'skip' };
+  // power sources and their converters are wired by hand: putting a battery / panel / USB adapter on the board's 5 V rail is a short
+  if (/^mod-(battery9v|battery18650|lipo|solar|buck)$/.test(t)) return { role: 'skip' };
+  if (t === 'mod-ftdi' && /^(VCC|5V|3V3)$/.test(B)) return { role: 'skip' };
   if (/lcd1602|lcd2004/.test(t) && !names.has('SDA')) {
     if (/^D[0-3]$/.test(B) || B === 'V0') return { role: 'skip' };
     if (B === 'RW' || B === 'K' || B === 'VSS') return { role: 'gnd' };
@@ -63,6 +66,8 @@ function compRole(part, info) {
     return { role: 'digital' };
   }
   if (t === 'wokwi-led') return B === 'A' ? { role: 'digital', pwm: true } : { role: 'gnd' };
+  if (t === 'wokwi-rgb-led') return B === 'COM' ? (part.attrs?.common === 'anode' ? { role: 'power', v: 5 } : { role: 'gnd' }) : { role: 'digital', pwm: true };   // the G leg is green, not ground
+  if (t === 'wokwi-ks2e-m-dc5') return B === 'COIL1' ? { role: 'digital' } : B === 'COIL2' ? { role: 'gnd' } : { role: 'skip' };   // contacts switch a load, never a GPIO; the coil gets its transistor driver from the suggestions
   if (B === 'NC') return { role: 'skip' };
   const i2cPart = part.pinInfo.some((p) => (p.signals || []).some((s) => s.type === 'i2c'));
   if (i2cPart && /^(DC|RST|CS|RES)$/.test(B)) return { role: 'skip' };                // I²C display: SPI-only pins stay free
@@ -80,7 +85,7 @@ function compRole(part, info) {
   if (/^(CS|SS|NSS|SDA)$/.test(B) && names.has('SCK')) return { role: 'spi', sig: 'SS' };
   if (/^(TX|TXD)$/.test(B) && (names.has('RX') || names.has('RXD'))) return { role: 'uart', sig: 'TX' };
   if (/^(RX|RXD)$/.test(B) && (names.has('TX') || names.has('TXD'))) return { role: 'uart', sig: 'RX' };
-  if (sig.some((s) => s.type === 'analog') || /^(AO|AOUT|A0|VOUT|VRX|VRY|X|Y)$/.test(B) || (/^(OUT|SIG|S)$/.test(B) && /pot|ldr|photo|flex|ntc|soil|sound|gas|mq|water|ph|tds|force|fsr|joystick|slide/i.test(t))) return { role: 'analog' };
+  if (sig.some((s) => s.type === 'analog') || /^(AO|AOUT|A0|VOUT|VRX|VRY|X|Y)$/.test(B) || (/^(OUT|SIG|S)$/.test(B) && /pot|ldr|photo|flex|ntc|soil|sound|gas|mq|water|ph|tds|force|fsr|joystick|slide|voltage|acs712|heart/i.test(t))) return { role: 'analog' };
   if (sig.some((s) => s.type === 'pwm') || /^(PWM|SERVO)$/.test(B)) return { role: 'digital', pwm: true };
   return { role: 'digital' };
 }

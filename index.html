@@ -33,6 +33,7 @@
     <symbol id="i-lib" viewBox="0 0 24 24"><path d="M5 4h3v16H5zM10 4h3v16h-3zM15.2 4.6l2.9-.8 4 15.5-2.9.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 3v5h7V3M8 21v-6h8v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
     <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="19" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6" stroke="currentColor" stroke-width="2"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
@@ -54,6 +55,8 @@
             <div class="menu" id="menuFile"><button class="mb">Berkas</button>
               <div class="menu-pop">
                 <button data-act="new">Proyek baru</button>
+                <button data-act="save">Simpan <kbd>Ctrl S</kbd></button>
+                <button data-act="saved">Proyek tersimpan…</button>
                 <button data-act="export-json">Unduh proyek (.json)</button>
                 <button data-act="import-json">Buka proyek (.json)…</button>
                 <button data-act="export-ino">Unduh kode (.ino)</button>
@@ -68,7 +71,7 @@
                 <hr /><button data-act="rotate">Putar komponen <kbd>R</kbd></button>
                 <button data-act="duplicate">Duplikat <kbd>Ctrl D</kbd></button>
                 <button data-act="delete">Hapus <kbd>Del</kbd></button>
-                <hr /><button data-act="wire-text">Sambung kabel (tabel pin)…</button><button data-act="tidy-wires">Rapikan semua kabel</button><button data-act="bundle-wires">Bundel kabel (rapi jadi satu)</button><button data-act="auto-bb">Pasang di breadboard</button><hr /><button data-act="auto-wire">Auto wiring (sambung otomatis)</button><button data-act="newbie">Mode Newbie (panduan belajar)</button><hr /><button data-act="clear-wires">Hapus semua kabel</button>
+                <hr /><button data-act="wire-text">Sambung kabel (tabel pin)…</button><button data-act="tidy-wires">Rapikan semua kabel</button><button data-act="bundle-wires">Bundel kabel (rapi jadi satu)</button><button data-act="auto-bb">Pasang di breadboard</button><hr /><button data-act="auto-wire">Auto wiring (sambung otomatis)</button><button data-act="extras">Saran komponen tambahan…</button><button data-act="newbie">Mode Newbie (panduan belajar)</button><hr /><button data-act="clear-wires">Hapus semua kabel</button>
               </div></div>
             <div class="menu" id="menuHelp"><button class="mb">Bantuan</button>
               <div class="menu-pop">
@@ -84,15 +87,20 @@
         <button class="mode" data-mode="build" role="tab">Build</button>
       </div>
       <div class="actions">
-        <div class="menu" id="menuDevice"><button class="icon-btn mb-dev" id="btnDevice" title="Mode tampilan: Laptop / iPad / HP" aria-haspopup="true"><svg id="devIcon"><use href="#i-dev-laptop"/></svg></button>
+        <div class="menu" id="menuDevice"><button class="icon-btn mb-dev" id="btnDevice" title="Mode tampilan & bahasa (Language)" aria-haspopup="true"><svg id="devIcon"><use href="#i-dev-laptop"/></svg></button>
           <div class="menu-pop menu-right" role="menu">
             <div class="menu-cap">Mode tampilan</div>
             <button data-dev="auto" role="menuitemradio"><svg><use href="#i-dev-auto"/></svg>Otomatis <span class="muted small" id="devAutoInfo"></span></button>
             <button data-dev="laptop" role="menuitemradio"><svg><use href="#i-dev-laptop"/></svg>Laptop / komputer</button>
             <button data-dev="tablet" role="menuitemradio"><svg><use href="#i-dev-tablet"/></svg>iPad / tablet</button>
             <button data-dev="phone" role="menuitemradio"><svg><use href="#i-dev-phone"/></svg>HP</button>
+            <div class="menu-cap" data-noi18n>Bahasa · Language</div>
+            <button data-lang="id" role="menuitemradio" data-noi18n><b class="lang-code">ID</b>Bahasa Indonesia</button>
+            <button data-lang="en" role="menuitemradio" data-noi18n><b class="lang-code">EN</b>English</button>
           </div></div>
+        <button id="btnLang" class="icon-btn lang-btn" title="Bahasa / Language" data-noi18n>ID</button>
         <button id="btnTheme" class="icon-btn" title="Mode gelap/terang"><svg><use href="#i-moon"/></svg></button>
+        <button id="btnSave" class="btn" title="Simpan proyek di perangkat ini (Ctrl+S)"><svg><use href="#i-save"/></svg><span>Simpan</span><i class="dirty-dot" hidden></i></button>
         <button id="btnShare" class="btn primary" title="Simpan ke database dan dapatkan tautan"><svg><use href="#i-share"/></svg><span>Bagikan</span></button>
       </div>
     </header>
@@ -115,7 +123,7 @@
         </section>
         <section class="lp" data-lp="examples" hidden><div class="lp-head"><b>Proyek contoh</b><span class="muted small">Ketuk untuk membuka</span></div><div id="examplesList" class="scroll"></div></section>
         <section class="lp" data-lp="check" hidden>
-          <div class="lp-head"><b>Pemeriksaan rangkaian</b><button class="btn" id="btnCheck"><svg><use href="#i-check"/></svg><span>Periksa sekarang</span></button></div>
+          <div class="lp-head"><b>Pemeriksaan rangkaian</b><button class="btn" id="btnCheck"><svg><use href="#i-check"/></svg><span>Periksa sekarang</span></button><button class="btn" id="btnExtras" title="Resistor, pembagi tegangan, pull-up, driver yang sebaiknya ditambahkan">Saran komponen tambahan</button></div>
           <div id="checkList" class="scroll"><div class="prop-empty">Tekan "Periksa sekarang" untuk mengecek daya, korsleting, pin 3.3 V/5 V, pin khusus ESP32, I2C, dan lainnya.</div></div>
         </section>
         <section class="lp" data-lp="props" hidden><div class="lp-head"><b>Properti</b></div><div id="propsBody" class="scroll"></div></section>
@@ -314,6 +322,7 @@
     </main>
   </div>
 
+  <dialog id="dlgSaved" class="wide"><form method="dialog"><h3>Proyek tersimpan</h3><p class="muted small">Proyek disimpan di peramban perangkat ini (tidak perlu internet). Untuk memindahkan ke perangkat lain, pakai Berkas → Unduh proyek (.json) atau Bagikan.</p><div id="savedList" class="saved-list"></div><menu><button class="btn">Tutup</button></menu></form></dialog>
   <dialog id="dlgShare"><form method="dialog"><h3>Bagikan simulasi</h3><p id="shareMsg"></p><div class="copyrow"><input id="shareUrl" readonly /><button type="button" class="btn" id="shareCopy">Salin</button></div><p class="muted small" id="shareNote"></p><menu><button class="btn">Tutup</button></menu></form></dialog>
   <dialog id="dlgSettings"><form method="dialog"><h3>Pengaturan kompilator</h3>
     <p class="muted small">Kode sendiri dikompilasi di server: Uno/Nano dengan avr-gcc, ESP32/ESP8266/Pico ke WebAssembly (clang). Contoh bawaan yang tidak diubah selalu berjalan tanpa server. Kompilator, Library Manager, dan gateway IoT sudah berjalan di situs ini (Vercel); URL lain hanya untuk server sendiri dari folder <code>server/</code>.</p>
@@ -331,6 +340,10 @@
     </div></form></dialog>
   <dialog id="dlgAutoCode" class="wide"><form method="dialog"><h3>Kode otomatis</h3><p class="muted small" id="acInfo"></p><pre id="acCode" class="ac-code"></pre><div id="acParts" class="ac-parts"></div>
     <menu><button class="btn" value="cancel">Tutup</button><button class="btn" type="button" id="acCopy">Salin</button><button class="btn primary" type="button" id="acUse">Pakai kode ini</button></menu></form></dialog>
+  <dialog id="dlgExtras" class="wide"><form method="dialog"><h3>Saran komponen tambahan</h3>
+    <p class="muted small" id="exInfo"></p>
+    <div id="exList" class="ex-list"></div>
+    <menu><button class="btn" value="cancel" id="exSkip">Lewati</button><button class="btn primary" type="button" id="exApply">Tambahkan yang dipilih</button></menu></form></dialog>
   <aside id="guide" class="guide" hidden aria-label="Panduan mode Newbie"></aside>
   <dialog id="dlgHelp"><form method="dialog"><h3 id="helpTitle">Cara pakai</h3><div id="helpBody" class="help"></div><menu><button class="btn primary">Mengerti</button></menu></form></dialog>
   <input type="file" id="fileIn" hidden />

@@ -64,7 +64,7 @@ function apply() {
 function syncMenu() {
   for (const b of document.querySelectorAll('[data-dev]')) b.classList.toggle('on', b.dataset.dev === mode);
   const icon = document.querySelector('#devIcon use'); if (icon) icon.setAttribute('href', '#i-dev-' + (mode === 'auto' ? 'auto' : mode));
-  const btn = document.getElementById('btnDevice'); if (btn) btn.title = `Mode tampilan: ${DEVICE_NAMES[mode]}${mode === 'auto' ? ' (' + DEVICE_NAMES[effectiveDevice()] + ')' : ''}`;
+  const btn = document.getElementById('btnDevice'); if (btn) btn.title = `Mode tampilan & bahasa · Language: ${DEVICE_NAMES[mode]}${mode === 'auto' ? ' (' + DEVICE_NAMES[effectiveDevice()] + ')' : ''}`;
   const ai = document.getElementById('devAutoInfo'); if (ai) ai.textContent = '· ' + DEVICE_NAMES[detectDevice()];
 }
 export function setDeviceMode(m) {

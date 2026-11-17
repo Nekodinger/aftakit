@@ -100,7 +100,7 @@ const WOKWI = [
     props: [{ key: 'inserted', label: 'Kartu terpasang', type: 'select', options: ['ya', 'tidak'], def: 'ya' }] },
   // ---- passive
   { tag: 'wokwi-resistor', name: 'Resistor', cat: 'Pasif & Dasar', sim: 'full', keywords: 'hambatan ohm',
-    props: [{ key: 'value', label: 'Nilai (Ω)', type: 'select', options: ['100', '220', '330', '470', '1000', '2200', '4700', '10000', '47000', '100000'], def: '220' }] },
+    props: [{ key: 'value', label: 'Nilai (Ω)', type: 'select', options: ['100', '220', '330', '470', '1000', '2000', '2200', '3300', '4700', '10000', '47000', '100000'], def: '220' }] },
   { tag: 'wokwi-biaxial-stepper', name: 'Stepper Biaxial (gauge)', cat: 'Aktuator', sim: 'full', keywords: 'gauge x27 168 jarum speedometer' },
 ];
 

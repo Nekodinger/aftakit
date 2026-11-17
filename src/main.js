@@ -15,6 +15,8 @@ import { putZip, getZip, sha256, describeZip } from './libs.js';
 import { saveProject, loadProject, sharingAvailable } from './store.js';
 import { EXAMPLES, exampleModel, EXAMPLE_GROUPS } from './examples/defs.js';
 import { exampleHexText, hasExampleHex, exampleWasm, hasExampleWasm } from './examples/pack.js';
+import { initI18n, setLang, LANG, tr } from './i18n.js';
+initI18n();
 
 registerParts();
 initDevice();
@@ -116,6 +118,12 @@ function hintFor(msg) {
   if (/No such file or directory|fatal error:|file not found/.test(msg)) return runtimeOf(boardOf()) === 'avr'
     ? 'Library tidak tersedia. Sudah terpasang untuk Uno/Nano/Mega: Servo, LiquidCrystal(_I2C), Adafruit NeoPixel/GFX/SSD1306/ILI9341/BMP280/BME280/MPU6050/ADS1X15/VL53L0X, FastLED, U8g2, DHT, RTClib, OneWire + DallasTemperature, HX711, TM1637, LedControl, MD_Parola, MFRC522, RF24, LoRa, TinyGPS++, IRremote, SD, Keypad, Stepper, AccelStepper, NewPing, RotaryEncoder, MPU6050 (I2Cdev), MPU6050_light, BH1750, ACS712, L298N, GravityTDS, DFRobot_PH, MQUnifiedsensor, MQ135, VL53L0X, TFMPlus, IBusBM, TinyGSM, SoftwareSerial, EEPROM. Periksa ejaan nama file .h.'
     : 'Library tidak tersedia. ESP32/ESP8266/RP2040 punya WiFi, HTTPClient, WiFiClientSecure, ArduinoJson, BluetoothSerial, Preferences, EEPROM, Ticker, ESP32Servo, esp_camera, plus semua library Uno (FastLED, U8g2, DHTesp, Blynk, UniversalTelegramBot, PubSubClient, ThingSpeak, DFRobot_ESP_EC/PH, ...). Library lain diunduh otomatis dari Arduino Library Manager; periksa ejaan nama file .h.';
+  if (/expected unqualified-id/.test(msg)) {
+    if (/numeric constant|before [‘'"]?\d/.test(msg)) return 'Nama di baris ini sudah dipakai oleh #define atau nama bawaan Arduino (mis. LED, A0, HIGH, LED_BUILTIN). Ganti nama variabelnya, atau hapus #define yang sama.';
+    if (/before [‘'"]?(if|for|while|switch|return|Serial|delay|digitalWrite|analogWrite|pinMode)\b/.test(msg)) return 'Perintah ini berada di luar fungsi. Pindahkan ke dalam void setup() { } atau void loop() { }; biasanya ada kurung kurawal } berlebih di atasnya yang menutup fungsi terlalu cepat.';
+    if (/before [‘'"]?\{/.test(msg)) return 'Hapus titik koma setelah nama fungsi (contoh salah: void setup(); { ... }), atau tambahkan nama fungsi sebelum kurung kurawal {.';
+    return 'Ada kode yang berada di luar fungsi atau kurung kurawal } berlebih. Periksa baris ini dan baris di atasnya: setiap perintah harus di dalam void setup() { } atau void loop() { }, dan jangan memakai nama yang sama dengan #define.';
+  }
   if (/did you mean/.test(msg)) return 'Kemungkinan salah ketik: lihat saran nama yang benar di pesan ini.';
   if (/use of undeclared identifier/.test(msg)) return 'Periksa ejaan nama, atau deklarasikan variabel/fungsi sebelum dipakai.';
   if (/undefined reference to .(setup|loop)/.test(msg)) return 'Sketch harus punya fungsi void setup() dan void loop().';
@@ -775,6 +783,7 @@ function renderProps(soft) {
 // ------------------------------------------------------------------ examples / projects
 async function loadExample(id) {
   const ex = EXAMPLES.find((e) => e.id === id); if (!ex) return;
+  state.localId = null; savedSnap = null; refreshDirty();
   stopSim(); await canvas.setModel(exampleModel(ex));
   try {                                                        // examples are built on a breadboard, with right-angle wiring
     const { autoBreadboard } = await import('./ui/autobb.js');
@@ -783,7 +792,7 @@ async function loadExample(id) {
     canvas.history = []; canvas.hpos = -1; canvas.snapshot();
   } catch (e) { console.warn('breadboard layout', e); }
   editor.value = ex.code; state.exampleId = id; state.projectId = null; state.libs = []; renderLibs(); state.hex = null; state.wasm = null; state.hexFor = null; state.hexOnly = false;
-  $('#projectTitle').value = ex.title; editor.marks.clear();
+  $('#projectTitle').value = tr(ex.title); editor.marks.clear();
   addLog('info', `Contoh dimuat: ${ex.title}. ${ex.board === 'design' ? 'Board ini dalam mode desain; tekan Jalankan untuk memeriksa rangkaian.' : 'Tekan Jalankan.'}`);
   history.replaceState(null, '', '#ex=' + id);
   updateBoardInfo(); runCheck();
@@ -796,7 +805,18 @@ exl.onclick = (e) => { const b = e.target.closest('[data-ex]'); if (b) loadExamp
 
 function closeMenus() { $$('.menu.open').forEach((m) => m.classList.remove('open')); }
 $$('.menu > .mb, #btnDevice').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const m = b.parentElement, o = m.classList.contains('open'); closeMenus(); if (!o) m.classList.add('open'); }));
+// language: the page reloads in the other language; the current project is carried over in sessionStorage
+function switchLang(l) {
+  if (l === LANG) return;
+  try { sessionStorage.setItem('sim.carry', JSON.stringify({ ...projectData(), localId: state.localId || null, savedSnap })); } catch { /* storage blocked: the default example loads */ }
+  state.switchingLang = true;
+  setLang(l);
+}
+$$('[data-lang]').forEach((b) => b.classList.toggle('on', b.dataset.lang === LANG));
+$('#btnLang').textContent = LANG.toUpperCase();
+$('#btnLang').onclick = () => switchLang(LANG === 'en' ? 'id' : 'en');
 $('#menuDevice .menu-pop').addEventListener('click', (e) => {
+  const lb = e.target.closest('[data-lang]'); if (lb) { closeMenus(); switchLang(lb.dataset.lang); return; }
   const b = e.target.closest('[data-dev]'); if (!b) return; closeMenus(); setDeviceMode(b.dataset.dev);
   toast(`Mode tampilan: ${DEVICE_NAMES[b.dataset.dev]}${b.dataset.dev === 'auto' ? ' (' + DEVICE_NAMES[effectiveDevice()] + ')' : ''}`);
 });
@@ -812,7 +832,7 @@ document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.menu')
 function projectData() { const m = canvas.getModel(); return { v: 2, title: $('#projectTitle').value, code: editor.value, parts: m.parts, connections: m.connections, example: state.exampleId, libs: state.libs }; }
 async function applyProject(d) {
   stopSim(); await canvas.setModel({ parts: d.parts || [], connections: d.connections || [] });
-  editor.value = d.code || DEFAULT_CODE; $('#projectTitle').value = d.title || 'Proyek'; state.exampleId = d.example && EXAMPLES.find((e) => e.id === d.example)?.code === d.code && (hasExampleHex(d.example) || hasExampleWasm(d.example)) ? d.example : null;
+  editor.value = d.code || DEFAULT_CODE; { const ex = EXAMPLES.find((e) => e.title === d.title || tr(e.title) === d.title); $('#projectTitle').value = ex ? tr(ex.title) : (d.title || tr('Proyek')); } state.exampleId = d.example && EXAMPLES.find((e) => e.id === d.example)?.code === d.code && (hasExampleHex(d.example) || hasExampleWasm(d.example)) ? d.example : null;
   state.libs = Array.isArray(d.libs) ? d.libs.filter((l) => l && /^[0-9a-f]{64}$/.test(l.sha)) : []; renderLibs();
   state.hex = null; state.hexFor = null; state.hexOnly = false; updateBoardInfo(); runCheck();
 }
@@ -821,7 +841,7 @@ const fname = () => ($('#projectTitle').value || 'proyek').replace(/[^\w\-]+/g, 
 let fileMode = null;
 async function doAction(act) {
   switch (act) {
-    case 'new': stopSim(); await canvas.setModel({ parts: [], connections: [] }); editor.value = DEFAULT_CODE; state.exampleId = null; state.libs = []; renderLibs(); state.hex = null; state.hexFor = null; $('#projectTitle').value = 'Proyek tanpa judul'; history.replaceState(null, '', location.pathname); updateBoardInfo(); runCheck(); break;
+    case 'new': state.localId = null; savedSnap = null; refreshDirty(); stopSim(); await canvas.setModel({ parts: [], connections: [] }); editor.value = DEFAULT_CODE; state.exampleId = null; state.libs = []; renderLibs(); state.hex = null; state.hexFor = null; $('#projectTitle').value = tr('Proyek tanpa judul'); history.replaceState(null, '', location.pathname); updateBoardInfo(); runCheck(); break;
     case 'export-json': download(fname() + '.json', JSON.stringify(projectData(), null, 2), 'application/json'); break;
     case 'export-ino': download(fname() + '.ino', editor.value); break;
     case 'export-hex': if (state.hex) download(fname() + '.hex', state.hex); else toast(state.wasm ? 'File .hex hanya untuk Uno/Nano. Untuk ESP32 unduh .ino lalu unggah lewat Arduino IDE.' : 'Belum ada hasil kompilasi. Tekan Kompilasi dulu.', true); break;
@@ -834,6 +854,7 @@ async function doAction(act) {
     case 'delete': canvas.deleteSelected(); break;
     case 'wire-text': openWireText(); break;
     case 'auto-wire': autoWire(); break;
+    case 'extras': offerExtras({ manual: true }); break;
     case 'newbie': toggleNewbie(); break;
     case 'auto-bb': {
       stopSim(); const { autoBreadboard } = await import('./ui/autobb.js'); const r = await autoBreadboard(canvas, BY_TAG);
@@ -845,6 +866,7 @@ async function doAction(act) {
     case 'tidy-wires': toast(canvas.tidyWires() ? 'Semua kabel dirapikan (jalur siku).' : 'Belum ada kabel.'); break;
     case 'clear-wires': for (const w of [...canvas.wires]) if (!w.plug) canvas._removeWire(w, true); canvas.emit('change', { structural: true }); break;
     case 'help': openHelp(); break; case 'about': openAbout(); break;
+    case 'save': saveLocal(); break; case 'saved': openSaved(); break;
   }
 }
 $$('.menu-pop').forEach((m) => (m.onclick = (e) => { const b = e.target.closest('[data-act]'); if (b) { closeMenus(); doAction(b.dataset.act); } }));
@@ -852,7 +874,7 @@ $$('[data-act2]').forEach((b) => (b.onclick = () => doAction(b.dataset.act2)));
 $('#fileIn').onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return; const text = await f.text();
   try {
-    if (fileMode === 'json') { const d = JSON.parse(text); if (!Array.isArray(d.parts)) throw new Error('Berkas bukan proyek simulator (tidak ada daftar komponen).'); await applyProject(d); toast('Proyek dibuka.'); }
+    if (fileMode === 'json') { const d = JSON.parse(text); if (!Array.isArray(d.parts)) throw new Error('Berkas bukan proyek simulator (tidak ada daftar komponen).'); await applyProject(d); state.localId = null; savedSnap = null; refreshDirty(); toast('Proyek dibuka.'); }
     else { const { parseHex } = await import('./sim/hex.js'); parseHex(text); state.hex = text; state.hexFor = editor.value; state.hexOnly = true; state.exampleId = null; addLog('ok', `Berkas HEX dimuat (${f.name}). Tekan Jalankan.`); toast('HEX dimuat — tekan Jalankan.'); }
   } catch (err) { addLog('error', 'Gagal membuka berkas: ' + err.message); toast(err.message, true); }
 };
@@ -885,6 +907,45 @@ $('#btnShare').onclick = async () => {
   }
   $('#shareMsg').textContent = msg; $('#shareUrl').value = url; $('#shareNote').textContent = note; dlg.showModal(); $('#shareUrl').select();
 };
+// ------------------------------------------------------------------ save on this device (localStorage)
+const SAVE_KEY = 'sim.projects';
+const savedAll = () => { try { return JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') || {}; } catch { return {}; } };
+let savedSnap = null, dirtyT = 0;
+const snapOf = () => { const d = projectData(); return JSON.stringify([d.title, d.code, d.parts, d.connections]); };
+function refreshDirty() { const dirty = savedSnap !== null && snapOf() !== savedSnap; $('#btnSave .dirty-dot').hidden = !dirty; }
+function markDirty() { clearTimeout(dirtyT); dirtyT = setTimeout(refreshDirty, 400); }
+function markClean() { savedSnap = snapOf(); refreshDirty(); }
+function saveLocal() {
+  const all = savedAll(), id = state.localId || 'p' + Date.now().toString(36);
+  const data = projectData(); data.title = data.title.trim() || tr('Proyek tanpa judul');
+  all[id] = { id, title: data.title, savedAt: Date.now(), parts: data.parts.length, data };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(all)); }
+  catch { toast('Penyimpanan perangkat penuh atau diblokir. Pakai Berkas → Unduh proyek (.json).', true); return; }
+  state.localId = id; markClean();
+  toast(`Proyek "${data.title}" disimpan di perangkat ini (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}).`);
+}
+function openSaved() {
+  const list = Object.values(savedAll()).sort((a, b) => b.savedAt - a.savedAt), host = $('#savedList');
+  host.innerHTML = list.length ? list.map((p) => `<div class="saved-item${p.id === state.localId ? ' cur' : ''}"><div class="meta"><b>${esc(p.title)}</b><span class="muted small">${new Date(p.savedAt).toLocaleString()} · ${p.parts} komponen</span></div><button type="button" class="btn" data-open="${p.id}">Buka</button><button type="button" class="btn danger" data-del="${p.id}" title="Hapus dari perangkat ini"><svg><use href="#i-trash"/></svg></button></div>`).join('')
+    : '<div class="saved-empty muted">Belum ada proyek tersimpan. Tekan Simpan untuk menyimpan proyek yang sedang dibuka.</div>';
+  $('#dlgSaved').open || $('#dlgSaved').showModal();
+}
+$('#savedList').onclick = async (e) => {
+  const o = e.target.closest('[data-open]'), d = e.target.closest('[data-del]'), all = savedAll();
+  if (o && all[o.dataset.open]) {
+    if (savedSnap !== null && snapOf() !== savedSnap && !confirm('Perubahan yang belum disimpan akan hilang. Lanjutkan?')) return;
+    $('#dlgSaved').close(); await applyProject(all[o.dataset.open].data); state.localId = o.dataset.open; history.replaceState(null, '', location.pathname); markClean(); toast('Proyek dibuka.');
+  } else if (d && all[d.dataset.del] && confirm(`Hapus "${all[d.dataset.del].title}" dari perangkat ini?`)) {
+    delete all[d.dataset.del]; try { localStorage.setItem(SAVE_KEY, JSON.stringify(all)); } catch { /* ignore */ }
+    if (state.localId === d.dataset.del) { state.localId = null; refreshDirty(); }
+    openSaved();
+  }
+};
+$('#btnSave').onclick = saveLocal;
+window.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveLocal(); } });
+canvas.on('change', markDirty); $('#projectTitle').addEventListener('input', markDirty); $('#code').addEventListener('input', markDirty);
+window.addEventListener('beforeunload', (e) => { if (state.localId && savedSnap !== null && snapOf() !== savedSnap && !state.switchingLang) { e.preventDefault(); e.returnValue = ''; } });
+
 $('#shareCopy').onclick = async () => { const i = $('#shareUrl'); i.select(); try { await navigator.clipboard.writeText(i.value); toast('Tautan disalin.'); } catch { document.execCommand('copy'); toast('Tautan disalin.'); } };
 
 // ------------------------------------------------------------------ settings, help, theme
@@ -897,12 +958,12 @@ function openHelp() {
   <h4>Membuat kabel</h4><ul><li>Ketuk pin pertama, lalu ketuk pin tujuan. Atau seret dari pin ke pin.</li><li>Selama kabel belum selesai: geser layar (satu jari / seret area kosong) dan cubit zoom tidak membatalkan kabel; ketuk area kosong untuk menambah belokan; seret kabel ke tepi layar untuk menggeser otomatis. Batal: tombol ✕ Batal, Esc, atau ketuk pin awal lagi.</li><li>Ketuk kabel untuk memilih: seret titik ● untuk memindah belokan, seret + untuk menambah belokan, ketuk ganda ● untuk menghapus. Panel Properti: ganti warna, <b>Rapikan kabel ini</b>, <b>Rapikan semua kabel</b>, hapus.</li><li><b>Ketik</b> (toolbar): sambung kabel dengan teks, satu baris per kabel, mis. <code>esp32:D21 - oled1:SDA kuning</code>, <code>esp32:GND ke bb1:-</code>, <code>bb1:a10 - led1:A</code>.</li></ul>
   <h4>Bundel kabel</h4><ul><li>Menu Edit → <b>Bundel kabel</b> (atau panel Properti kabel): kabel antara dua komponen yang sama disatukan jadi satu jalur rapi, berjajar sejajar, menghindari badan komponen, diikat cable tie. Bundel ikut menyesuaikan saat komponen digeser; <b>Lepas bundel</b> untuk mengurai.</li></ul>
   <h4>Desain PCB</h4><ul><li>Tombol <b>PCB</b>: rangkaian yang sudah benar dijadikan PCB 2 lapis. Breadboard hilang, sambungannya jadi jalur tembaga; modul & board dicolok lewat female header di posisi pin aslinya.</li><li>Seret komponen untuk mengatur posisi, <b>Rute otomatis</b> untuk menarik jalur (clearance 0,2 mm, via otomatis), cek DRC, lalu <b>Unduh Gerber (.zip)</b> — langsung bisa diunggah ke pabrik PCB.</li></ul>
-  <h4>Auto wiring · Auto kode · Newbie</h4><ul><li><b>Auto wiring</b>: semua pin komponen yang belum tersambung diberi pin mikrokontroler yang cocok (VCC sesuai tegangan modul, GND, I²C/SPI/UART bawaan, ADC untuk keluaran analog, PWM bila perlu, GPIO bebas untuk sisanya; LED lewat resistor bila ada), lalu ditancapkan ke breadboard dan dirapikan. Alasan tiap pin ditulis di Log.</li><li><b>Auto kode</b> (di tab <b>Kode</b>): membaca komponen terhubung ke pin mana, lalu membuat program lengkap dengan library yang sesuai. Bisa dipakai terpisah dari Auto wiring (misalnya setelah merangkai sendiri).</li><li><b>Newbie</b>: panduan langkah demi langkah. Tahap <i>Rangkai</i> menunjukkan pin mana disambung ke mana beserta alasannya (pin menyala kuning, langkah tercentang sendiri saat kabel dibuat), tahap <i>Kode</i> menyusun program per komponen, tahap <i>Uji</i> mengajarkan cara menguji tiap komponen.</li><li>Contoh proyek otomatis dipasang di breadboard; menu Edit → <b>Pasang di breadboard</b> melakukan hal yang sama untuk rangkaianmu, tanpa mengubah sambungan listriknya. Semua kabel digambar bersiku.</li></ul>
+  <h4>Auto wiring · Auto kode · Newbie</h4><ul><li><b>Auto wiring</b>: semua pin komponen yang belum tersambung diberi pin mikrokontroler yang cocok (VCC sesuai tegangan modul, GND, I²C/SPI/UART bawaan, ADC untuk keluaran analog, PWM bila perlu, GPIO bebas untuk sisanya; LED lewat resistor bila ada), lalu ditancapkan ke breadboard dan dirapikan. Alasan tiap pin ditulis di Log.</li><li><b>Saran komponen tambahan</b>: setelah Auto wiring, rangkaian diperiksa terhadap wiring tutorial Random Nerd Tutorials, Adafruit dan datasheet. Bila perlu, muncul jendela saran: resistor 220 Ω untuk LED, pembagi tegangan 1 kΩ + 2 kΩ untuk sinyal 5 V ke pin 3,3 V (HC-SR04, sensor analog 5 V di ESP32), pull-up 4,7 kΩ DS18B20, pull-up 10 kΩ DHT22, resistor dan kapasitor NeoPixel, transistor + dioda untuk relay, modul MOSFET untuk motor/pompa. Centang yang ingin dipakai; komponen baru hanya ditambahkan setelah kamu menekan <b>Tambahkan yang dipilih</b>. Saran bisa dibuka lagi dari menu Edit atau tombol di panel Periksa.</li><li><b>Auto kode</b> (di tab <b>Kode</b>): membaca komponen terhubung ke pin mana, lalu membuat program lengkap dengan library yang sesuai. Bisa dipakai terpisah dari Auto wiring (misalnya setelah merangkai sendiri).</li><li><b>Newbie</b>: panduan langkah demi langkah. Tahap <i>Rangkai</i> menunjukkan pin mana disambung ke mana beserta alasannya (pin menyala kuning, langkah tercentang sendiri saat kabel dibuat), tahap <i>Kode</i> menyusun program per komponen, tahap <i>Uji</i> mengajarkan cara menguji tiap komponen.</li><li>Contoh proyek otomatis dipasang di breadboard; menu Edit → <b>Pasang di breadboard</b> melakukan hal yang sama untuk rangkaianmu, tanpa mengubah sambungan listriknya. Semua kabel digambar bersiku.</li></ul>
   <h4>Tampilan 3D</h4><ul><li>Tombol <b>3D</b> di toolbar: rangkaian dalam 3D dan tetap tersimulasi (LED menyala, layar, NeoPixel, servo ikut bergerak).</li><li>Seret: putar · dua jari / klik kanan: geser · cubit / scroll: zoom · tombol Iso/Atas/Depan · keyboard WASD, Q/E, +/−.</li><li>Komponen bisa dioperasikan langsung di 3D: tekan tombol, putar potensio / encoder, gerakkan joystick, geser saklar, ketuk keypad / DIP / remote IR, dan <b>seret sensor naik-turun</b> untuk mengubah nilainya (suhu, jarak, cahaya, gas …). Panel <b>Kontrol</b> pada kartu komponen berisi semua nilai sensor.</li><li><b>Ukur</b> (M): multimeter. Ketuk pin, lubang breadboard, atau ujung kabel untuk memasang probe; tegangan, HIGH/LOW/PWM, mode pin (INPUT/OUTPUT) dan sambungannya tampil langsung. Dua probe menampilkan beda tegangannya.</li><li><b>Diagnosa</b> (G): daftar kesalahan dari cek rangkaian, peringatan simulasi, dan pengukuran daya tiap komponen. Komponen bermasalah diberi kotak merah / kuning; ketuk butir untuk menuju komponennya.</li></ul>
   <h4>Mobil robot & ESP-NOW</h4><ul><li>Komponen <b>Sasis Mobil Robot 2WD</b> (kategori Robot): sambungkan motornya ke L298N, lalu taruh ESP32, driver, baterai, dan sensor di atas sasis. Menggeser sasis di Desain ikut membawa komponen di atasnya.</li><li>Buka <b>3D</b> lalu <b>Jalankan</b>: mobil berjalan di arena sesuai tegangan motor. Pilih arena (dinding 2×2 m, rintangan, lintasan garis hitam, lantai bebas) di Properti sasis. Tombol <b>Ikuti mobil</b> (K) dan <b>Reset mobil</b> ada di bilah 3D.</li><li>Sensor di atas sasis membaca arena: HC-SR04 / JSN-SR04T / VL53L0X mengukur jarak ke dinding, FC-51 melihat halangan &lt; 15 cm, TCRT5000 mendeteksi garis hitam.</li><li><b>ESP-NOW</b>: <code>#include &lt;esp_now.h&gt;</code> (ESP32) atau <code>&lt;espnow.h&gt;</code> (ESP8266). Tab <b>ESP-NOW</b> di konsol adalah remote virtual: tahan tombol arah (atau W/A/S/D) untuk mengirim huruf perintah, atau pilih format struct joystick. Paket yang dikirim board (<code>esp_now_send</code>) tampil di sana. Callback gaya Arduino-ESP32 2.x dan 3.x sama-sama didukung.</li><li>Contoh siap pakai: grup <b>Robot & ESP-NOW</b> (mobil RC ESP-NOW, robot penghindar halangan, robot pengikut garis).</li></ul>
   <h4>Benda di sekitar sensor (3D)</h4><ul><li>Sensor jarak menampilkan dinding pada jarak yang diatur; seret dinding maju/mundur untuk mengubah jarak. Sensor ketinggian air memperlihatkan tangki berisi air, sensor tanah memperlihatkan tanah (makin gelap makin basah), sensor hujan memperlihatkan tetesan, LDR lampu, sensor api lilin.</li></ul>
-  <h4>Mode tampilan: Laptop, iPad, HP</h4><ul><li>Tombol layar di kanan atas memilih tata letak. <b>Otomatis</b> menyesuaikan perangkat. Di HP, panel ada di bilah bawah dan konsol bisa diperkecil. Memilih mode yang lebih kecil dari layar menampilkan pratinjau berbingkai (berguna bagi guru untuk melihat tampilan siswa di HP).</li></ul>
-  <h4>Kanvas</h4><ul><li>Satu jari di area kosong: geser kanvas. Dua jari: cubit untuk zoom.</li><li>Seret komponen untuk memindah. Saat simulasi berjalan, seret lewat label nama di atasnya.</li><li>Tombol putar, duplikat, hapus, urungkan/ulangi ada di toolbar atas.</li></ul>
+  <h4>Mode tampilan: Laptop, iPad, HP</h4><ul><li>Tombol layar di kanan atas memilih tata letak. <b>Otomatis</b> menyesuaikan perangkat. Di HP, panel ada di bilah bawah dan konsol bisa diperkecil. Memilih mode yang lebih kecil dari layar menampilkan pratinjau berbingkai (berguna bagi guru untuk melihat tampilan siswa di HP).</li><li><b>Bahasa</b>: tombol <b>ID</b>/<b>EN</b> di kanan atas (atau menu mode tampilan) mengganti bahasa antarmuka ke Bahasa Indonesia atau English, termasuk nama komponen, menu, pesan Log, dan panduan. Kode program tidak diterjemahkan. Proyek yang sedang dibuka tetap terbawa.</li></ul>
+  <h4>Kanvas</h4><ul><li>Satu jari di area kosong: geser kanvas. Dua jari: cubit untuk zoom.</li><li>Seret komponen untuk memindah. Saat simulasi berjalan, seret lewat label nama di atasnya.</li><li>Tombol putar, duplikat, hapus, urungkan/ulangi ada di toolbar atas.</li><li><b>Simpan</b> (Ctrl+S) di kanan atas menyimpan proyek di perangkat ini; buka lagi lewat Berkas → <b>Proyek tersimpan</b>. Titik oranye di tombol Simpan berarti ada perubahan yang belum disimpan.</li></ul>
   <h4>Simulasi</h4><ul><li>Rangkai di <b>Desain</b>, tulis program di <b>Kode</b> (tombol <b>Auto kode</b> membuatkan program dari rangkaianmu), lalu tekan <b>Jalankan</b>. Simulasi berjalan langsung di kanvas Desain (2D maupun 3D); galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Kode dijalankan untuk Arduino Uno/Nano/Mega, Franzininho (ATtiny85), ESP32 DevKit, ESP32-CAM, NodeMCU / Wemos D1 mini (ESP8266), Raspberry Pi Pico dan Nano RP2040 Connect.</li></ul>
   <h4>ESP32: WiFi, internet, Bluetooth, kamera</h4><ul><li><b>WiFi</b> tersimulasi: <code>WiFi.begin()</code> tersambung ±1 detik (nama/password bebas, mis. "Wokwi-GUEST"), IP 10.10.0.2.</li><li><b>Internet nyata</b>: <code>HTTPClient</code> (GET/POST, http/https) memakai koneksi iPad/laptop ini; layanan tanpa izin CORS otomatis lewat proxy simulator.</li><li><b>Blynk, Telegram, MQTT, ThingSpeak</b>: <code>WiFiClient</code> / <code>WiFiClientSecure</code> / <code>WiFiUDP</code> tersambung sungguhan lewat <b>gateway IoT</b> server kompilasi (seperti Wokwi), jadi library asli (BlynkSimpleEsp32, UniversalTelegramBot, PubSubClient…) dan API key asli langsung bisa dipakai.</li><li><b>Library</b>: <code>#include</code> library dari Arduino Library Manager diunduh otomatis. Library .zip (mis. Edge Impulse) ditambahkan di panel <b>Library</b>.</li><li><b>Bluetooth</b>: <code>BluetoothSerial</code> tersambung ke tab <b>Bluetooth</b> di konsol (seperti aplikasi Serial Bluetooth Terminal di HP).</li><li><b>ESP32-CAM</b>: <code>esp_camera_fb_get()</code> mengambil foto JPEG dari tab <b>Kamera</b>: kamera iPad/laptop, foto unggahan, atau gambar contoh.</li><li>Seperti ESP32 asli: ADC2 (GPIO 0, 2, 4, 12–15, 25–27) tidak bisa dibaca saat WiFi aktif — pakai GPIO 32–39. GPIO 34–39 hanya input. Logika 3,3 V.</li><li><b>Edge Impulse</b>: unggah ekspor "Arduino library" di panel Library; ESP32-CAM memakai gambar dari tab Kamera (<code>fmt2rgb888</code> didukung).</li><li>Belum didukung: WebServer / server di dalam ESP32 (gateway hanya koneksi keluar), Bluetooth BLE, FreeRTOS task. Waktu CPU diperkirakan, bukan akurat per siklus.</li></ul>`;
   $('#dlgHelp').showModal();
@@ -923,13 +984,15 @@ renderPalette(); renderProps(); updateBoardInfo(); updateBuildView();
 (async () => {
   const q = new URLSearchParams(location.search), h = location.hash;
   try {
-    if (q.get('p')) { const row = await loadProject(q.get('p')); state.projectId = null; await applyProject(row.data || row); toast('Proyek dibuka dari tautan.'); }
+    let carry = null; try { carry = sessionStorage.getItem('sim.carry'); sessionStorage.removeItem('sim.carry'); } catch { /* storage blocked */ }
+    if (carry) { const c = JSON.parse(carry); await applyProject(c); state.localId = c.localId; savedSnap = c.savedSnap ?? null; if (savedSnap !== null) refreshDirty(); }
+    else if (q.get('p')) { const row = await loadProject(q.get('p')); state.projectId = null; await applyProject(row.data || row); toast('Proyek dibuka dari tautan.'); }
     else if (h.startsWith('#d=')) { await applyProject(JSON.parse(await b64.dec(h.slice(3)))); toast('Proyek dibuka dari tautan.'); }
     else await loadExample(h.startsWith('#ex=') && EXAMPLES.some((e) => e.id === h.slice(4)) ? h.slice(4) : 'blink');
   } catch (e) { addLog('error', 'Gagal membuka proyek dari tautan: ' + e.message); await loadExample('blink'); }
   state.fittedOnce = true;
   window.addEventListener('hashchange', () => { const id = location.hash.slice(4); if (location.hash.startsWith('#ex=') && id !== state.exampleId && EXAMPLES.some((e) => e.id === id)) loadExample(id); });
-  window.__sim = { sim, canvas, editor, state, run, setMode, showPanel, runCheck };   // handle for automated tests
+  window.__sim = { sim, canvas, editor, state, run, setMode, showPanel, runCheck }; window.__BY_TAG = BY_TAG;   // handle for automated tests
 })();
 
 // ---------------------------------------------------------------- wiring by typing
@@ -1013,10 +1076,11 @@ async function autoWire() {
   const [{ planWiring, applyWiring }, , { autoBreadboard }] = await learn();
   const plan = planWiring(canvas, BY_TAG);
   if (!plan) { toast('Tambahkan mikrokontroler (ESP32 / Arduino) dulu.', true); return; }
-  if (!plan.steps.length) { toast('Semua pin komponen sudah tersambung.'); return; }
+  if (!plan.steps.length) { const k = await offerExtras(); if (!k) toast('Semua pin komponen sudah tersambung.'); return; }
   stopSim();
   const n = applyWiring(canvas, plan);
   for (const s of plan.steps) addLog('info', `Auto wiring: ${s.b} → ${s.a}. ${s.reason}`);
+  await offerExtras();                                    // resistor / divider / pull-up / driver: only with the user's OK
   const hasBB = [...canvas.parts.values()].some((p) => BY_TAG[p.type]?.breadboard);
   const r = hasBB ? null : await autoBreadboard(canvas, BY_TAG);
   if (!r?.ok) canvas.bundleWires();
@@ -1040,6 +1104,34 @@ async function autoCode() {
   $('#acCopy').onclick = () => navigator.clipboard?.writeText(g.code).then(() => toast('Kode disalin.'));
   $('#dlgAutoCode').showModal();
 }
+// ---------------------------------------------------------------- Saran komponen tambahan (popup, applied only when confirmed)
+async function offerExtras({ manual = false } = {}) {
+  const { suggestExtras, applyExtras } = await import('./learn/extras.js');
+  const list = suggestExtras(canvas, BY_TAG);
+  if (!list.length) { if (manual) toast('Rangkaian sudah rapi: tidak ada komponen tambahan yang disarankan.'); return 0; }
+  const dlg = $('#dlgExtras');
+  $('#exInfo').textContent = `Agar rangkaian aman dan lolos Periksa, ${list.length} perbaikan berikut disarankan (mengikuti wiring tutorial Random Nerd Tutorials, Adafruit, dan datasheet). Centang yang ingin ditambahkan.`;
+  $('#exList').innerHTML = list.map((x, i) => `<label class="ex-item"><input type="checkbox" data-i="${i}" checked><b>${esc(x.title)}</b><p>${esc(x.detail)}</p><span class="ex-parts">${x.parts.map((p) => `<i>+ ${esc(p)}</i>`).join('')}</span><span class="ex-src">Rujukan: ${esc(x.source)}</span></label>`).join('');
+  return new Promise((resolve) => {
+    const done = async (ok) => {
+      $('#exApply').onclick = null; dlg.onclose = null; if (dlg.open) dlg.close();
+      if (!ok) { addLog('info', 'Saran komponen tambahan dilewati.'); resolve(0); return; }
+      const pick = [...$('#exList').querySelectorAll('input:checked')].map((c) => list[+c.dataset.i]);
+      if (!pick.length) { resolve(0); return; }
+      stopSim();
+      const ids = await applyExtras(canvas, pick);
+      for (const x of pick) addLog('ok', `Ditambahkan: ${x.title}. ${x.detail}`);
+      if (manual && ids.length) canvas.tidyWires();             // after Auto wiring the breadboard step tidies everything
+      runCheck(true); toast(`${ids.length} komponen tambahan dipasang dan disambungkan.`);
+      resolve(ids.length);
+    };
+    $('#exApply').onclick = () => done(true);
+    dlg.onclose = () => done(false);
+    dlg.showModal();
+  });
+}
+$('#btnExtras').onclick = () => offerExtras({ manual: true });
+
 let guide = null;
 async function toggleNewbie(force) {
   if (!guide) {
@@ -1057,4 +1149,4 @@ async function toggleNewbie(force) {
 $('#tbAutoWire').onclick = () => autoWire();
 $('#btnAutoCode').onclick = () => autoCode();
 $('#tbNewbie').onclick = () => toggleNewbie();
-window.__learn = { autoWire, autoCode, toggleNewbie, get guide() { return guide; } };   // handle for automated tests
+window.__learn = { autoWire, autoCode, toggleNewbie, offerExtras, get guide() { return guide; } };   // handle for automated tests

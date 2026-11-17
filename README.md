@@ -14,6 +14,9 @@ breadboard, pemeriksaan rangkaian, ramah layar sentuh. Semua komponen di katalog
 - Sasis mobil robot 2WD (`mod-car-chassis`): dua motor TT, kinematika diferensial, arena 3D (dinding, rintangan, lintasan garis). Komponen di atas sasis ikut bergerak di 3D; HC-SR04 / VL53L0X / FC-51 / TCRT5000 di atasnya membaca arena (`src/sim/car.js`).
 - 3D: benda di sekitar sensor (dinding yang bisa diseret untuk sensor jarak, tangki air, tanah, tetes hujan, lampu LDR, lilin sensor api) — `src/ui/scene3d.js`.
 - Mode tampilan Laptop / iPad / HP (otomatis atau dipilih), termasuk pratinjau berbingkai — `src/ui/device.js`.
+- Saran komponen tambahan setelah Auto wiring (popup, hanya ditambahkan bila disetujui): resistor 220 Ω LED, pembagi 1 kΩ + 2 kΩ untuk sinyal 5 V ke GPIO 3,3 V, pull-up DS18B20 4,7 kΩ / DHT22 10 kΩ, resistor 330 Ω + kapasitor 1000 µF NeoPixel, NPN + 1 kΩ + 1N4007 untuk relay, modul MOSFET untuk motor/pompa — `src/learn/extras.js`. Pemecah rangkaian menghitung pembagi resistor secara nodal (`src/sim/circuit.js`).
+- Bahasa antarmuka Indonesia / English (tombol ID/EN atau menu mode tampilan). Kode program tidak diterjemahkan — `src/i18n.js`, kamus `src/i18n-en.js` (kunci = teks Indonesia, termasuk potongan pesan bertemplat).
+- Tombol Simpan (Ctrl+S): proyek disimpan di perangkat (localStorage), daftar di Berkas → Proyek tersimpan; titik oranye menandai perubahan yang belum disimpan.
 
 ## Komponen protokol (dimodelkan sampai level register / pin, diuji dengan library asli)
 - 1-Wire: DS18B20 (OneWire + DallasTemperature, beberapa sensor satu jalur). Dua kabel: TM1637, HX711.

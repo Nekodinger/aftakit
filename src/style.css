@@ -710,3 +710,30 @@ body.mode-pcb #toolbar .tb-group:not(.run-group):not(.v3-keep) { display: none; 
 
 #console.mid:not(.collapsed) { height: 310px; }
 :root[data-device="phone"] #console.mid:not(.collapsed) { height: 58vh; }
+
+/* Saran komponen tambahan */
+.ex-list { display: flex; flex-direction: column; gap: 8px; max-height: 56vh; overflow: auto; }
+.ex-item { display: grid; grid-template-columns: 26px 1fr; gap: 4px 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); cursor: pointer; }
+.ex-item input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); }
+.ex-item b { font-size: 13.5px; } .ex-item p { grid-column: 2; margin: 0; font-size: 12.5px; line-height: 1.45; }
+.ex-item .ex-src { grid-column: 2; font-size: 11px; color: var(--muted); }
+.ex-item .ex-parts { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px; }
+.ex-item .ex-parts i { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
+
+/* language switch */
+.lang-btn { font: 700 12px/1 system-ui, sans-serif; letter-spacing: .04em; min-width: 34px; }
+.menu-pop .lang-code { display: inline-grid; place-items: center; width: 22px; height: 18px; border-radius: 4px; font-size: 10px; background: var(--accent-soft); color: var(--accent); flex: none; }
+
+/* save button + saved projects */
+#btnSave { position: relative; }
+#btnSave .dirty-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; }
+:root[data-device="phone"] #btnSave { padding: 0 11px; }
+:root[data-device="phone"] #btnSave span { display: none; }
+.saved-list { display: grid; gap: 8px; max-height: 55vh; overflow: auto; margin: 10px 0; }
+.saved-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; }
+.saved-item.cur { border-color: var(--accent); }
+.saved-item .meta { flex: 1; min-width: 0; }
+.saved-item .meta b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-empty { padding: 18px; text-align: center; }
+/* phones: the language switch lives in the display-mode menu, so the File/Edit/Help menus keep their room */
+:root:is([data-device="phone"], [data-w="xs"]) #btnLang { display: none; }

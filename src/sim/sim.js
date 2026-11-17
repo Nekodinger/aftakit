@@ -79,6 +79,7 @@ export class Simulator {
     const sim = this;
     const netOf = (name) => sim.ardNets[name] ?? -1;
     const partsOn = (net) => (net < 0 ? [] : (sim.circuit.members[net] || []).map((m) => { const i = m.indexOf(':'); return { id: m.slice(0, i), pin: m.slice(i + 1) }; }));
+    const partsNear = (net) => sim.netsNear(net).flatMap(partsOn);
     const partById = (id) => sim.model.parts.find((p) => p.id === id);
     const v = (net) => (sim.last && net >= 0 ? sim.last.v(net) : null);
     const powered = (id, vccPins, gndPins) => {
@@ -107,7 +108,7 @@ export class Simulator {
       pulseIn(name, state, timeout) {
         const rx = partsOn(netOf(name)).find((m) => partById(m.id)?.type === 'mod-rc-rx' && /^CH\d$/.test(m.pin));
         if (rx) { const b = sim.behaviors.find((x) => x._part.id === rx.id); const us = state ? b?.pulseFor(rx.pin) || 0 : 0; return us > timeout ? 0 : us; }
-        const hit = partsOn(netOf(name)).find((m) => ['wokwi-hc-sr04', 'mod-jsn-sr04t'].includes(partById(m.id)?.type) && m.pin === 'ECHO');
+        const hit = partsNear(netOf(name)).find((m) => ['wokwi-hc-sr04', 'mod-jsn-sr04t'].includes(partById(m.id)?.type) && m.pin === 'ECHO');
         if (!hit) return 0;
         const p = partById(hit.id);
         if (!powered(p.id, ['VCC'], ['GND'])) { sim.warn(`hc-pw-${p.id}`, `${p.id}: tidak mendapat daya (butuh 5 V).`); return 0; }
@@ -119,7 +120,7 @@ export class Simulator {
       },
       pushPixels(name, bytes) {
         const net = netOf(name);
-        const st = sim.pixelChains.find((c) => sim.circuit.net(c.chain[0]._part.id, 'DIN') === net);
+        const st = sim.pixelChains.find((c) => sim.netsNear(net).includes(sim.circuit.net(c.chain[0]._part.id, 'DIN')));
         if (!st) { sim.warn(`px-none-${name}`, `NeoPixel: tidak ada LED NeoPixel yang DIN-nya terhubung ke ${name}.`); return; }
         st.bytes = [...bytes]; sim._flushPixels(st);
       },
@@ -228,6 +229,15 @@ export class Simulator {
       }
     }
 
+    // nets joined by a small series resistor (LED / NeoPixel DIN resistor, upper leg of a 5 V → 3.3 V divider):
+    // a signal pin behind one still belongs to that GPIO for timing-level helpers (pulseIn, NeoPixel, edges)
+    this.seriesNets = new Map();
+    for (const p of model.parts) {
+      if (p.type !== 'wokwi-resistor' || +(p.attrs?.value ?? 220) > 2200) continue;
+      const a = this.circuit.net(p.id, '1'), b = this.circuit.net(p.id, '2');
+      if (a < 0 || b < 0 || a === b) continue;
+      for (const [x, y] of [[a, b], [b, a]]) { if (!this.seriesNets.has(x)) this.seriesNets.set(x, []); this.seriesNets.get(x).push(y); }
+    }
     // behaviours
     this.espnowActive = false; this._ow = null; this._air = null; this._ir = null; this.btModules = []; this.ftdiPorts = []; this._hostSvc = null; this._phys = null; this.drone = null;
     this.behaviors = [];
@@ -275,8 +285,13 @@ export class Simulator {
 
   arduinoPinsOnNet(net) {
     if (net < 0) return [];
-    return Object.keys(this.ardNets).filter((k) => this.ardNets[k] === net);
+    const direct = Object.keys(this.ardNets).filter((k) => this.ardNets[k] === net);
+    if (direct.length) return direct;
+    const via = this.seriesNets?.get(net) || [];
+    return Object.keys(this.ardNets).filter((k) => via.includes(this.ardNets[k]));
   }
+  /** the net itself plus the nets one small series resistor away */
+  netsNear(net) { return net < 0 ? [] : [net, ...(this.seriesNets?.get(net) || [])]; }
 
   dispose() {
     for (const b of this.behaviors) { b.dispose?.(); b._dispose?.(); }

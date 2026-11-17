@@ -1,3 +1,4 @@
+import { tr } from '../i18n.js';
 // Generic module parts (sensor boards, MCU boards, actuators...) drawn from a declarative spec.
 // Each spec becomes a custom element <mod-xxx> that exposes `pinInfo` like Wokwi elements, so the
 // canvas, the net solver and the behaviours treat them exactly like the built-in Wokwi parts.
@@ -31,7 +32,7 @@ function decoSvg(d) {
     case 'rect': return `<rect x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" rx="${d.rx ?? 1}" fill="${f}"${st}/>`;
     case 'circle': return `<circle cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${f}"${st}/>`;
     case 'path': return `<path d="${d.d}" fill="${f}"${st}/>`;
-    case 'text': return `<text x="${d.x}" y="${d.y}" font-size="${d.size ?? 7}" fill="${d.fill ?? '#fff'}" text-anchor="${d.anchor ?? 'middle'}" font-weight="${d.bold ? 700 : 500}" font-family="Arial,Helvetica,sans-serif"${d.key ? ` data-text="${d.key}"` : ''}>${esc(d.text)}</text>`;
+    case 'text': return `<text x="${d.x}" y="${d.y}" font-size="${d.size ?? 7}" fill="${d.fill ?? '#fff'}" text-anchor="${d.anchor ?? 'middle'}" font-weight="${d.bold ? 700 : 500}" font-family="Arial,Helvetica,sans-serif"${d.key ? ` data-text="${d.key}"` : ''}>${esc(tr(d.text))}</text>`;
     case 'led': return `<circle data-led="${d.key}" cx="${d.x}" cy="${d.y}" r="${d.r ?? 2.6}" fill="#3a2a2a" data-on="${d.color ?? '#ff3b30'}" stroke="#0006" stroke-width=".6"/>`;
     case 'rotor': return `<g data-rotor="${d.key ?? ''}" transform-origin="${d.x} ${d.y}"><circle cx="${d.x}" cy="${d.y}" r="${d.r}" fill="${d.fill ?? '#c9ced6'}" stroke="#555" stroke-width="1"/>`
       + `<rect x="${d.x - d.r * 0.9}" y="${d.y - 2}" width="${d.r * 1.8}" height="4" rx="2" fill="#555"/><rect x="${d.x - 2}" y="${d.y - d.r * 0.9}" width="4" height="${d.r * 1.8}" rx="2" fill="#777"/>`
@@ -81,7 +82,7 @@ export function defineModule(spec) {
           + (spec.nolabels ? '' : `<text x="${lx}" y="${ly}" font-size="${spec.pinFont ?? 5.6}" fill="${spec.labelColor ?? '#fff'}" text-anchor="${anchor}" font-family="Arial,Helvetica,sans-serif"${rot}>${esc(p.label)}</text>`);
       }).join('');
       const body = spec.body === false ? '' : `<rect x=".5" y=".5" width="${w - 1}" height="${h - 1}" rx="${spec.rx ?? 4}" fill="${spec.color ?? '#1b4f9c'}" stroke="#0005"/>`;
-      const label = spec.label === false ? '' : `<text x="${spec.lx ?? w / 2}" y="${spec.ly ?? h / 2 + 3}" font-size="${spec.lsize ?? 8}" fill="${spec.lcolor ?? '#fff'}" text-anchor="middle" font-weight="700" font-family="Arial,Helvetica,sans-serif" data-text="label">${esc(spec.label ?? spec.name)}</text>`;
+      const label = spec.label === false ? '' : `<text x="${spec.lx ?? w / 2}" y="${spec.ly ?? h / 2 + 3}" font-size="${spec.lsize ?? 8}" fill="${spec.lcolor ?? '#fff'}" text-anchor="middle" font-weight="700" font-family="Arial,Helvetica,sans-serif" data-text="label">${esc(tr(spec.label ?? spec.name))}</text>`;
       const screen = spec.screen ? `<canvas width="${spec.screen.cols}" height="${spec.screen.rows}" style="position:absolute;left:${spec.screen.x}px;top:${spec.screen.y}px;width:${spec.screen.w}px;height:${spec.screen.h}px;image-rendering:pixelated;background:#000"></canvas>` : '';
       this.shadowRoot.innerHTML = `<style>:host{display:inline-block;position:relative;width:${w}px;height:${h}px;line-height:0}svg{display:block;overflow:visible}[data-rotor]{transition:none}</style>`
         + `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">${body}${(spec.deco || []).map(decoSvg).join('')}${label}${pinsSvg}</svg>${screen}`;
@@ -129,7 +130,7 @@ export function defineModule(spec) {
       (this._px ||= [...g.querySelectorAll('[data-px]')].map((e) => [e, ...e.dataset.px.split('.').map(Number)]))
         .forEach(([e, m, r, c]) => { const f = ((rows[m]?.[r] ?? 0) >> (7 - c)) & 1 ? col : '#3a1010'; if (e._f !== f) { e._f = f; e.setAttribute('fill', f); } });
     }
-    setText(sel, text) { const t = this.shadowRoot.querySelector(`[data-text="${sel}"]`); if (t) t.textContent = text; }
+    setText(sel, text) { const t = this.shadowRoot.querySelector(`[data-text="${sel}"]`); if (t) t.textContent = tr(text); }
   }
   customElements.define(spec.tag, ModuleElement);
 }

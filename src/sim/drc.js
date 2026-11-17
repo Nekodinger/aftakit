@@ -85,10 +85,18 @@ export function checkDesign(model, els) {
   const isEsp = mcu === 'esp32' || mcu === 'esp8266', is33 = isEsp || mcu === 'rp2040';
   const gpioOf = (pin) => gpioMap[pin] ?? gpioMap[base(pin)];
   // walk through a resistor once so "GPIO -> R -> LED" counts as connected
+  const via = new Map();                                            // pin reached through a series resistor -> that resistor's id
   const reach = (n) => {
-    const res = new Set(members(n));
-    for (const m of [...res]) { const [id, pin] = m.split(':'); if (byId[id]?.type === 'wokwi-resistor') for (const x of members(net(id, pin === '1' ? '2' : '1'))) res.add(x); }
+    const res = new Set(members(n)); via.clear();
+    for (const m of [...res]) { const [id, pin] = m.split(':'); if (byId[id]?.type === 'wokwi-resistor') for (const x of members(net(id, pin === '1' ? '2' : '1'))) if (!res.has(x)) { res.add(x); via.set(x, id); } }
     return [...res];
+  };
+  const ohms = (id) => { const v = String(byId[id]?.attrs?.value ?? '220').toLowerCase(); return (parseFloat(v) || 220) * (v.includes('k') ? 1e3 : v.includes('m') ? 1e6 : 1); };
+  /** voltage a series resistor + resistor(s) to GND on the GPIO net leave of vv volts (null: no divider) */
+  const divided = (gpioNet, r1, vv) => {
+    let g = 0;
+    for (const m of members(gpioNet)) { const [id, pin] = m.split(':'); if (id === r1 || byId[id]?.type !== 'wokwi-resistor') continue; if (sources.get(net(id, pin === '1' ? '2' : '1')) === 0) g += 1 / ohms(id); }
+    if (!g) return null; const r2 = 1 / g; return vv * r2 / (r2 + ohms(r1));
   };
   const analogPins = mcu === 'esp8266' ? new Set(['A0']) : mcu === 'uno' || mcu === 'nano' ? new Set(['A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7']) : null;
   for (const pin of pinsOf(board.id)) {
@@ -102,7 +110,9 @@ export function checkDesign(model, els) {
       if (is33 && ct.logic === 'vcc' && ct.outs?.includes(base(ppin))) {
         const vcc = pinsOf(id).find((x) => POWER_IN.includes(base(x)));
         const vv = vcc ? sources.get(net(id, vcc)) : undefined;
-        if (vv && vv > 3.6) add('warn', `${id}.${base(ppin)} → ${label}: modul diberi ${vv} V sehingga sinyalnya bisa ${vv} V, melebihi batas 3.3 V GPIO ${ct.mcu || cat.mcu}. Beri pembagi tegangan (mis. 1 kΩ + 2 kΩ) atau beri modul 3.3 V bila mampu.`);
+        const dv = vv && via.has(m) ? divided(n, via.get(m), vv) : null;
+        if (dv !== null && dv <= 3.6) { /* voltage divider brings the signal to a safe level */ }
+        else if (vv && vv > 3.6) add('warn', `${id}.${base(ppin)} → ${label}: modul bekerja di ${vv} V, jadi sinyalnya juga ${vv} V, padahal GPIO ${ct.mcu || cat.mcu} hanya tahan 3,3 V. Beri pembagi tegangan (mis. 1 kΩ + 2 kΩ) atau beri modul 3.3 V bila mampu.`);
       }
       // input-only pins
       if (mcu === 'esp32' && ESP32_INPUT_ONLY.has(g) && DRIVEN(p.type, ppin)) add('error', `${label} hanya bisa INPUT, tetapi dipakai untuk mengendalikan ${id}.${base(ppin)}. Pindah ke GPIO lain (mis. 25, 26, 27, 32, 33).`);

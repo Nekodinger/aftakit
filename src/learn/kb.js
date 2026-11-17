@@ -145,6 +145,16 @@ export const TEMPLATES = [
   [/^mod-vibration$/, digitalSensor('Getaran', 'DO', false, TEST_TOGGLE)],
   [/^mod-touch$/, digitalSensor('Sentuhan', 'SIG', false, TEST_TOGGLE)],
   [/^wokwi-tilt-switch$/, digitalSensor('Miring', 'OUT', false, TEST_TOGGLE)],
+  [/^mod-mosfet$/, (c) => need(c, 'SIG') && {
+    glob: [pinConst(c, 'SIG', c.pins.SIG)], setup: [`pinMode(${P(c, 'SIG')}, OUTPUT);`],
+    loop: [`analogWrite(${P(c, 'SIG')}, (millis() / 20) % 256);   // kecepatan beban naik 0 → 255 lalu ulang`],
+    explain: 'Modul MOSFET menjadi saklar beban (motor, pompa, kipas) yang arusnya terlalu besar untuk pin GPIO. analogWrite (PWM) di pin SIG mengatur daya rata-rata ke beban.',
+    test: 'Jalankan simulasi: putaran motor/pompa di beban naik perlahan lalu berulang dari nol.' }],
+  [/^mod-npn$/, (c) => need(c, 'B') && {
+    glob: [pinConst(c, 'B', c.pins.B)], setup: [`pinMode(${P(c, 'B')}, OUTPUT);`],
+    loop: [`digitalWrite(${P(c, 'B')}, (millis() / 2000) % 2);   // transistor ON/OFF tiap 2 detik`],
+    explain: 'Transistor NPN (2N2222) sebagai saklar: HIGH di basis (lewat resistor 1 kΩ) membuat arus mengalir dari C ke E, sehingga beban seperti koil relay menyala.',
+    test: 'Jalankan simulasi: relay/beban di kolektor menyala dan mati tiap 2 detik.' }],
   [/^mod-relay[124]$/, (c) => need(c, 'IN1') || need(c, 'IN') ? {
     glob: [pinConst(c, 'IN', c.pins.IN1 ?? c.pins.IN)], setup: [`pinMode(${P(c, 'IN')}, OUTPUT);`],
     loop: [`digitalWrite(${P(c, 'IN')}, (millis() / 2000) % 2 ? ${c.attrs?.trigger === 'HIGH' ? 'HIGH' : 'LOW'} : ${c.attrs?.trigger === 'HIGH' ? 'LOW' : 'HIGH'});   // relay aktif-${c.attrs?.trigger === 'HIGH' ? 'HIGH' : 'LOW'}`],

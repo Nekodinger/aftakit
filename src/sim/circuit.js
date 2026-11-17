@@ -103,6 +103,29 @@ export class Circuit {
     propagate();
     for (const p of pullups) { if (p < 0) continue; const g = find(p); if (val[g] === null) val[g] = 1; }
     propagate();
+    // resistor networks: a node that is not driven but joins several resistors settles at the conductance-weighted
+    // mean of its neighbours (nodal analysis, Gauss-Seidel), so 5 V → 1 kΩ → GPIO → 2 kΩ → GND gives 3.33 V.
+    // A node on a single resistor keeps its neighbour's value exactly as before.
+    const adj = new Map(), link = (x, y, c) => { if (!adj.has(x)) adj.set(x, []); adj.get(x).push([y, c]); };
+    for (const [a, b, r] of weak) {
+      if (a < 0 || b < 0) continue; const ga = find(a), gb = find(b); if (ga === gb) continue;
+      const c = 1 / Math.max(1, +r || 1000); link(ga, gb, c); link(gb, ga, c);
+    }
+    const PULL = 1 / 40000, pulled = new Set(pullups.filter((p) => p >= 0).map(find));   // INPUT_PULLUP ≈ 40 kΩ to VCC
+    const free = [...adj.keys()].filter((g) => !isStrong[g] && (adj.get(g).length > 1 || pulled.has(g)));
+    for (let it = 0; it < 80 && free.length; it++) {
+      let dmax = 0;
+      for (const g of free) {
+        let s = 0, w = 0;
+        for (const [h, c] of adj.get(g)) if (val[h] !== null) { s += c * val[h]; w += c; }
+        if (pulled.has(g) && adj.get(g).length) { s += PULL; w += PULL; }
+        if (!w) continue;
+        const nv = s / w; if (val[g] === null || Math.abs(nv - val[g]) > dmax) dmax = Math.abs(nv - (val[g] ?? 0));
+        val[g] = nv;
+      }
+      if (dmax < 1e-5) break;
+    }
+    for (const g of free) if (adj.get(g).filter(([h]) => val[h] !== null).length > 1) peak[g] = null;
     return {
       v: (net) => (net < 0 ? null : val[find(net)]),
       strong: (net) => (net < 0 ? false : isStrong[find(net)]),

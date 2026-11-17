@@ -1,3 +1,4 @@
+import { tr } from '../i18n.js';
 // "Drone" console tab: chase-camera 3D view of the quadcopter, telemetry, and a two-stick RC transmitter (mode 2)
 // that feeds the FlySky receiver part (CH1 roll, CH2 pitch, CH3 throttle, CH4 yaw, CH5 arm switch, CH6 mode switch).
 import { euler, SLOTS, RC_DEFAULT } from '../sim/drone.js';
@@ -142,9 +143,9 @@ export function initDroneView(sim, els) {
   }
   function hud(lines, W, warn) {
     g.font = '12px ui-monospace, Menlo, monospace';
-    const h = 8 + lines.length * 16, w = Math.min(W - 16, Math.max(...lines.map((l) => g.measureText(l).width)) + 16);
+    const h = 8 + lines.length * 16, w = Math.min(W - 16, Math.max(...lines.map((l) => g.measureText(tr(l)).width)) + 16);
     g.fillStyle = 'rgba(15,23,42,.62)'; g.fillRect(8, 8, w, h);
-    lines.forEach((l, i) => { g.fillStyle = warn && i === 0 ? '#fca5a5' : '#f8fafc'; g.fillText(l, 16, 22 + i * 16); });
+    lines.forEach((l, i) => { g.fillStyle = warn && i === 0 ? '#fca5a5' : '#f8fafc'; g.fillText(tr(l), 16, 22 + i * 16); });
   }
   sim.on('tick', () => { if (visible) draw(); });
   apply();
