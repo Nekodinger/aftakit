@@ -628,9 +628,11 @@ function renderProps(soft) {
   if (!sel) { host.innerHTML = '<div class="prop-empty">Ketuk komponen atau kabel di kanvas untuk melihat dan mengubah propertinya.</div>'; return; }
   if (sel.kind === 'wire') {
     const w = canvas.wires.find((x) => x.id === sel.id); if (!w) return;
-    host.innerHTML = `<div class="prop-h"><b>Kabel</b><code>${esc(w.a)} → ${esc(w.b)}</code></div><div class="swatches">${WIRE_COLORS.map((c) => `<button class="swatch${c === w.color ? ' on' : ''}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div><div class="prop-actions"><button class="btn" id="tidyWire" title="Jalur siku rapi dari pin ke pin">Rapikan kabel ini</button><button class="btn" id="bendClear"${w.pts?.length ? '' : ' disabled'}>Hapus belokan (${w.pts?.length || 0})</button><button class="btn" id="tidyAll">Rapikan semua kabel</button><button class="btn danger" id="delWire"><svg><use href="#i-trash"/></svg><span>Hapus kabel</span></button></div><div class="prop-hint">Seret titik ● untuk memindah belokan, seret tanda + di tengah segmen untuk menambah belokan, ketuk ganda ● untuk menghapusnya.</div>`;
+    host.innerHTML = `<div class="prop-h"><b>Kabel</b><code>${esc(w.a)} → ${esc(w.b)}</code></div><div class="swatches">${WIRE_COLORS.map((c) => `<button class="swatch${c === w.color ? ' on' : ''}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div><div class="prop-actions"><button class="btn" id="tidyWire" title="Jalur siku rapi dari pin ke pin">Rapikan kabel ini</button><button class="btn" id="bendClear"${w.pts?.length ? '' : ' disabled'}>Hapus belokan (${w.pts?.length || 0})</button><button class="btn" id="tidyAll">Rapikan semua kabel</button><button class="btn" id="bundleWire" title="Satukan semua kabel antara dua komponen ini jadi satu bundel rapi">${w.bundle ? 'Lepas bundel' : 'Bundel kabel ke komponen ini'}</button><button class="btn" id="bundleAll">Bundel semua kabel</button><button class="btn danger" id="delWire"><svg><use href="#i-trash"/></svg><span>Hapus kabel</span></button></div><div class="prop-hint">Seret titik ● untuk memindah belokan, seret tanda + di tengah segmen untuk menambah belokan, ketuk ganda ● untuk menghapusnya.</div>`;
     host.querySelectorAll('.swatch').forEach((b) => (b.onclick = () => { canvas.setWireColor(w.id, b.dataset.c); renderProps(); }));
     $('#tidyWire').onclick = () => { canvas.tidyWires(w.id); renderProps(); }; $('#bendClear').onclick = () => { canvas.clearBends(w.id); renderProps(); }; $('#tidyAll').onclick = () => { canvas.tidyWires(); renderProps(); };
+    $('#bundleWire').onclick = () => { if (w.bundle) canvas.unbundle(w.id); else { const n = canvas.bundleWires(w.id); toast(n ? `${n} kabel dibundel.` : 'Bundel butuh minimal 2 kabel antara dua komponen yang sama.'); } renderProps(); };
+    $('#bundleAll').onclick = () => { const n = canvas.bundleWires(); toast(n ? `${n} kabel disatukan jadi bundel.` : 'Belum ada 2+ kabel antara dua komponen yang sama.'); renderProps(); };
     $('#delWire').onclick = () => canvas.deleteSelected(); return;
   }
   const part = canvas.parts.get(sel.id); if (!part) return; const cat = BY_TAG[part.type];
@@ -728,6 +730,7 @@ async function doAction(act) {
     case 'duplicate': if (canvas.selected?.kind === 'part') canvas.duplicate(canvas.selected.id); break;
     case 'delete': canvas.deleteSelected(); break;
     case 'wire-text': openWireText(); break;
+    case 'bundle-wires': { const n = canvas.bundleWires(); toast(n ? `${n} kabel disatukan jadi bundel rapi.` : 'Belum ada 2+ kabel antara dua komponen yang sama.'); break; }
     case 'tidy-wires': toast(canvas.tidyWires() ? 'Semua kabel dirapikan (jalur siku).' : 'Belum ada kabel.'); break;
     case 'clear-wires': for (const w of [...canvas.wires]) if (!w.plug) canvas._removeWire(w, true); canvas.emit('change', { structural: true }); break;
     case 'help': openHelp(); break; case 'about': openAbout(); break;
@@ -781,6 +784,8 @@ function openHelp() {
   $('#helpTitle').textContent = 'Cara pakai';
   $('#helpBody').innerHTML = `<h4>Menambah komponen</h4><ul><li>Ketuk kartu komponen untuk menaruhnya di tengah kanvas.</li><li>Di iPad: tahan kartu sebentar lalu seret ke kanvas. Dengan mouse: langsung seret.</li><li>Letakkan komponen di atas breadboard: kakinya menempel otomatis ke lubang terdekat.</li></ul>
   <h4>Membuat kabel</h4><ul><li>Ketuk pin pertama, lalu ketuk pin tujuan. Atau seret dari pin ke pin.</li><li>Selama kabel belum selesai: geser layar (satu jari / seret area kosong) dan cubit zoom tidak membatalkan kabel; ketuk area kosong untuk menambah belokan; seret kabel ke tepi layar untuk menggeser otomatis. Batal: tombol ✕ Batal, Esc, atau ketuk pin awal lagi.</li><li>Ketuk kabel untuk memilih: seret titik ● untuk memindah belokan, seret + untuk menambah belokan, ketuk ganda ● untuk menghapus. Panel Properti: ganti warna, <b>Rapikan kabel ini</b>, <b>Rapikan semua kabel</b>, hapus.</li><li><b>Ketik</b> (toolbar): sambung kabel dengan teks, satu baris per kabel, mis. <code>esp32:D21 - oled1:SDA kuning</code>, <code>esp32:GND ke bb1:-</code>, <code>bb1:a10 - led1:A</code>.</li></ul>
+  <h4>Bundel kabel</h4><ul><li>Menu Edit → <b>Bundel kabel</b> (atau panel Properti kabel): kabel antara dua komponen yang sama disatukan jadi satu jalur rapi, berjajar sejajar, menghindari badan komponen, diikat cable tie. Bundel ikut menyesuaikan saat komponen digeser; <b>Lepas bundel</b> untuk mengurai.</li></ul>
+  <h4>Desain PCB</h4><ul><li>Tombol <b>PCB</b>: rangkaian yang sudah benar dijadikan PCB 2 lapis. Breadboard hilang, sambungannya jadi jalur tembaga; modul & board dicolok lewat female header di posisi pin aslinya.</li><li>Seret komponen untuk mengatur posisi, <b>Rute otomatis</b> untuk menarik jalur (clearance 0,2 mm, via otomatis), cek DRC, lalu <b>Unduh Gerber (.zip)</b> — langsung bisa diunggah ke pabrik PCB.</li></ul>
   <h4>Tampilan 3D</h4><ul><li>Tombol <b>3D</b> di toolbar: rangkaian dalam 3D dan tetap tersimulasi (LED menyala, layar, NeoPixel, servo ikut bergerak).</li><li>Seret: putar · dua jari / klik kanan: geser · cubit / scroll: zoom · tombol Iso/Atas/Depan · keyboard WASD, Q/E, +/−.</li><li>Tekan tombol dan putar potensiometer langsung di model 3D; ketuk komponen untuk melihat pin dan sambungannya.</li></ul>
   <h4>Kanvas</h4><ul><li>Satu jari di area kosong: geser kanvas. Dua jari: cubit untuk zoom.</li><li>Seret komponen untuk memindah. Saat simulasi berjalan, seret lewat label nama di atasnya.</li><li>Tombol putar, duplikat, hapus, urungkan/ulangi ada di toolbar atas.</li></ul>
   <h4>Simulasi</h4><ul><li>Desain → Kode → Simulasi. Tekan <b>Jalankan</b>; galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Kode dijalankan untuk Arduino Uno/Nano, ESP32 DevKit, ESP32-CAM, NodeMCU / Wemos D1 mini (ESP8266) dan Raspberry Pi Pico.</li></ul>
@@ -859,7 +864,24 @@ async function toggle3D(force) {
     catch (e) { toast('Tampilan 3D gagal dimuat: ' + e.message, true); return; }
     finally { btn.disabled = false; }
   }
+  if (pcbView?.isOpen && force !== false) pcbView.close();
   if (force === false) view3d.close(); else if (force === true) view3d.open(); else view3d.toggle();
 }
 $('#tb3d').onclick = () => toggle3D();
 window.__view3d = { toggle: toggle3D, get: () => view3d };   // handle for automated tests
+
+// ---------------------------------------------------------------- PCB designer (loaded on first use)
+let pcbView = null;
+async function togglePcb(force) {
+  const btn = $('#tbPcb');
+  if (!pcbView) {
+    btn.disabled = true;
+    try { const { initPcb } = await import('./ui/pcbview.js'); pcbView = initPcb({ canvas, host: $('#pcbView'), catalog: BY_TAG, check: () => runCheck(false), toast, projectName: () => $('#projectTitle').value }); pcbView.onToggle = (on) => { btn.classList.toggle('on', on); document.body.classList.toggle('mode-pcb', on); }; }
+    catch (e) { toast('Desain PCB gagal dimuat: ' + e.message, true); return; }
+    finally { btn.disabled = false; }
+  }
+  if (view3d?.isOpen && force !== false) view3d.close();
+  if (force === false) pcbView.close(); else if (force === true) pcbView.open(); else pcbView.toggle();
+}
+$('#tbPcb').onclick = () => togglePcb();
+window.__pcb = { toggle: togglePcb, get: () => pcbView };   // handle for automated tests

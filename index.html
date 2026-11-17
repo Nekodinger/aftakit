@@ -62,7 +62,7 @@
                 <hr /><button data-act="rotate">Putar komponen <kbd>R</kbd></button>
                 <button data-act="duplicate">Duplikat <kbd>Ctrl D</kbd></button>
                 <button data-act="delete">Hapus <kbd>Del</kbd></button>
-                <hr /><button data-act="wire-text">Sambung kabel (tabel pin)…</button><button data-act="tidy-wires">Rapikan semua kabel</button><hr /><button data-act="clear-wires">Hapus semua kabel</button>
+                <hr /><button data-act="wire-text">Sambung kabel (tabel pin)…</button><button data-act="tidy-wires">Rapikan semua kabel</button><button data-act="bundle-wires">Bundel kabel (rapi jadi satu)</button><hr /><button data-act="clear-wires">Hapus semua kabel</button>
               </div></div>
             <div class="menu" id="menuHelp"><button class="mb">Bantuan</button>
               <div class="menu-pop">
@@ -132,6 +132,7 @@
             <div id="wireHint" hidden><span>Ketuk pin tujuan · seret untuk geser layar · ketuk area kosong untuk menambah belokan</span><button type="button" id="wireUndoBend" title="Hapus belokan terakhir">↶</button><button type="button" id="wireCancel" title="Batalkan kabel (Esc)">✕ Batal</button></div>
           </div>
           <div id="view3d" hidden></div>
+          <div id="pcbView" hidden></div>
           <div id="toolbar" role="toolbar" aria-label="Alat kanvas">
             <div class="tb-group run-group">
               <button id="btnRun" class="tb run" title="Jalankan (Ctrl+Enter)"><svg><use href="#i-play"/></svg><span>Jalankan</span></button>
@@ -154,6 +155,7 @@
               <button id="bbWire" class="tb on" title="Kabel: ketuk lubang breadboard untuk membuat kabel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="6" r="2.5"/><path d="M7 16.5C11 15 9 8 17 7.5"/></svg><span>Kabel</span></button>
             </div>
             <div class="tb-group v3-keep">
+              <button id="tbPcb" class="tb" title="Jadikan desain PCB (Gerber siap cetak)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.6"/><circle cx="16" cy="16" r="1.6"/><path d="M9.5 8H13l3 3v3.4M8 9.6V16h6.4"/></svg><span>PCB</span></button>
               <button id="tb3d" class="tb" title="Tampilan 3D (simulasi tetap berjalan)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg><span>3D</span></button>
               <button id="tbWireText" class="tb" title="Sambung kabel lewat tabel pin mikrokontroler ↔ komponen (atau ketik teks)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="18" rx="1.5"/><path d="M10 7h4M10 12h4M10 17h4"/><rect x="14" y="5" width="7" height="14" rx="1.5"/></svg><span>Sambung</span></button>
             </div>

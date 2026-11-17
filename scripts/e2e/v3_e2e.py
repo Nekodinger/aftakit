@@ -24,11 +24,11 @@ with sync_playwright() as p:
         ok(st['open'] and st['n']>0, f"[{ex}] 3D open: {st}")
         pg.screenshot(path=f"/tmp/v3_{ex}.png")
         if ex=='breadboard-led':
-            lit = pg.evaluate("() => [...window.__view3d.get()._debug().items.values()].filter(i=>i.kind==='led').map(i=>i.glow.material.opacity)")
+            lit = pg.evaluate("() => [...window.__view3d.get()._debug().items.values()].filter(i=>i.kind==='led').map(i=>i.model.kind)")
             ok(len(lit)==1, f"[{ex}] LED model present, glow {lit}")
         if ex=='button':
             # press the 3D button cap via pointer events
-            pos = pg.evaluate("""() => { const d=window.__view3d.get()._debug(); const it=[...d.items.values()].find(i=>i.kind==='button'); const v=it.cap.getWorldPosition(new it.cap.position.constructor()); v.project(d.camera);
+            pos = pg.evaluate("""() => { const d=window.__view3d.get()._debug(); const it=[...d.items.values()].find(i=>i.kind==='button'); const v=it.model.pick.getWorldPosition(new it.model.pick.position.constructor()); v.project(d.camera);
                const r=document.querySelector('.v3-gl').getBoundingClientRect(); return [r.left+(v.x+1)/2*r.width, r.top+(1-v.y)/2*r.height, it.part.id]; }""")
             pg.evaluate("""([x,y]) => { const c=document.querySelector('.v3-gl'); c.setPointerCapture=()=>{}; c.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:x,clientY:y,pointerId:3,button:0,pointerType:'mouse'})); }""", pos[:2])
             pg.wait_for_timeout(400)

@@ -1,6 +1,7 @@
 // Circuit editor: parts (web components), pin hotspots, wires, selection, pan/zoom,
 // rotation, breadboard snapping, undo/redo and full touch support (iPad: tap pins to wire,
 // drag parts, one-finger pan on empty canvas, two-finger pinch zoom).
+import { routeOrthogonal, offsetPolyline, simplify, orthogonalize } from './route.js';
 import { BY_TAG, propDefaults } from '../catalog.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -29,6 +30,7 @@ export class CircuitCanvas {
     this.history = []; this.hpos = -1; this._restoring = false;
     this.pinTip = document.createElement('div'); this.pinTip.className = 'pin-tip'; this.pinTip.hidden = true; this.pinLayer.append(this.pinTip);
     this.ghost = document.createElementNS(SVGNS, 'path'); this.ghost.setAttribute('class', 'wire ghost'); this.ghost.style.display = 'none'; this.wiresSvg.append(this.ghost);
+    this.tiesG = document.createElementNS(SVGNS, 'g'); this.tiesG.setAttribute('class', 'wire-ties'); this.wiresSvg.insertBefore(this.tiesG, this.ghost);
     // bend-point handles of the selected wire live above the parts so they can always be grabbed
     this.handlesSvg = document.createElementNS(SVGNS, 'svg'); this.handlesSvg.setAttribute('class', 'wire-handles'); this.handlesSvg.setAttribute('width', '8000'); this.handlesSvg.setAttribute('height', '8000');
     this.world.append(this.handlesSvg);
@@ -47,6 +49,8 @@ export class CircuitCanvas {
       version: 2,
       parts: [...this.parts.values()].map((p) => ({ id: p.id, type: p.type, left: Math.round(p.left * 10) / 10, top: Math.round(p.top * 10) / 10, rotate: p.rot * 90, attrs: { ...p.attrs } })),
       connections: this.wires.map((w) => (w.pts?.length && !w.plug ? [w.a, w.b, w.color, w.pts.map((q) => [Math.round(q.x), Math.round(q.y)])] : [w.a, w.b, w.plug ? 'plug' : w.color])),
+      ...(this.wires.some((w) => w.bundle) ? { bundles: this._bundleIndex() } : {}),
+      ...(this.pcbLayout ? { pcb: this.pcbLayout } : {}),
     };
   }
   elements() { return new Map([...this.parts].map(([id, p]) => [id, p.el])); }
@@ -63,6 +67,9 @@ export class CircuitCanvas {
       }
       await Promise.all(pending);
       for (const [a, b, color, pts] of model.connections || []) this._addWire(a, b, color === 'plug' ? null : color, true, color === 'plug', pts);
+      this.pcbLayout = model.pcb || null;
+      (model.bundles || []).forEach((idx, k) => { for (const i of idx) { const w = this.wires[i]; if (w && !w.plug) w.bundle = k + 1; } });
+      this._drawTies();
       for (const p of this.parts.values()) if (!isBB(p.type)) this._plug(p, false); // geometry decides breadboard contacts
       this._refreshAll(); this._hint(); this.emit('model');
       if (fit) this.fit();
@@ -271,12 +278,12 @@ export class CircuitCanvas {
     g.append(hit, under, path);
     const w = { id: this.nextWire++, a, b, color, g, hit, under, path, plug, pts: (pts || []).map((q) => (Array.isArray(q) ? { x: +q[0], y: +q[1] } : { x: +q.x, y: +q.y })).filter((q) => Number.isFinite(q.x) && Number.isFinite(q.y)) };
     if (!plug) g.addEventListener('pointerdown', (e) => { if (this.pending) return; e.stopPropagation(); this.select({ kind: 'wire', id: w.id }); this.viewport.focus({ preventScroll: true }); });
-    this.wiresSvg.insertBefore(g, this.ghost);
+    this.wiresSvg.insertBefore(g, this.tiesG);
     this.wires.push(w); if (!plug) this._drawWire(w); this._markWired();
     return w;
   }
   _removeWire(w, silent) {
-    w.g.remove(); this.wires = this.wires.filter((x) => x !== w); this._markWired();
+    w.g.remove(); if (w.bundle) queueMicrotask(() => this._drawTies()); this.wires = this.wires.filter((x) => x !== w); this._markWired();
     if (this.selected?.kind === 'wire' && this.selected.id === w.id) this.select(null);
     if (!silent) this.emit('change', { structural: true });
   }
@@ -310,7 +317,110 @@ export class CircuitCanvas {
     const d = this._wireD(pa, pb, w.pts); w.hit.setAttribute('d', d); w.under.setAttribute('d', d); w.path.setAttribute('d', d);
     if (this.selected?.kind === 'wire' && this.selected.id === w.id) this._drawHandles(w);
   }
-  _redrawWires() { for (const w of this.wires) this._drawWire(w); }
+  _redrawWires() { for (const w of this.wires) this._drawWire(w); this._drawTies(); }
+
+  // ---------------------------------------------------------------- wire bundles (neat harness)
+  _bundleIndex() {
+    const m = new Map(); this.wires.forEach((w, i) => { if (w.bundle) (m.get(w.bundle) || m.set(w.bundle, []).get(w.bundle)).push(i); });
+    return [...m.values()].filter((x) => x.length > 1);
+  }
+  /** groups of wires that run between the same two parts */
+  _wireGroups() {
+    const g = new Map();
+    for (const w of this.wires) {
+      if (w.plug) continue;
+      const pa = w.a.slice(0, w.a.lastIndexOf(':')), pb = w.b.slice(0, w.b.lastIndexOf(':'));
+      if (pa === pb) continue;
+      const [ra, rb] = pa < pb ? [w.a, w.b] : [w.b, w.a];
+      const side = (r) => { const q = this.pinPos(r); return q ? this._dir(q).join(',') : ''; };
+      const k = (pa < pb ? pa + '|' + pb : pb + '|' + pa) + '|' + side(ra) + '|' + side(rb); (g.get(k) || g.set(k, []).get(k)).push(w);
+    }
+    return g;
+  }
+  /**
+   * Route a group of wires between two parts as one harness: each wire leaves its pin straight out, then all
+   * of them run side by side (5 px apart) along a shared trunk and fan out again at the other part. Lanes are
+   * ordered so the wires do not cross; cable ties are drawn on the trunk.
+   */
+  _routeBundle(ws, id) {
+    const L = 12, sp = 5;
+    const ends = ws.map((w) => {
+      const [ra, rb] = w.a.split(':')[0] <= w.b.split(':')[0] ? [w.a, w.b] : [w.b, w.a];
+      const pa = this.pinPos(ra), pb = this.pinPos(rb); const da = this._dir(pa), db = this._dir(pb);
+      return { w, ra, pa, pb, da, p1: { x: pa.x + da[0] * L, y: pa.y + da[1] * L }, p2: { x: pb.x + db[0] * L, y: pb.y + db[1] * L } };
+    });
+    const avg = (f) => ends.reduce((t, e) => t + f(e), 0) / ends.length;
+    const S = { x: avg((e) => e.p1.x), y: avg((e) => e.p1.y) }, T = { x: avg((e) => e.p2.x), y: avg((e) => e.p2.y) };
+    const obs = [...this.parts.values()].filter((p) => !isBB(p.type)).map((p) => this._partBox(p, 6));
+    const d0 = ends[0].da, startDir = d0[0] > 0 ? 0 : d0[1] > 0 ? 1 : d0[0] < 0 ? 2 : 3;
+    let spine = routeOrthogonal(S, T, obs, { startDir }) || [S, { x: T.x, y: S.y }, T];
+    if (spine.length < 2) spine = [S, T];
+    if (spine.length === 2 && spine[0].x !== spine[1].x && spine[0].y !== spine[1].y) spine = [S, { x: T.x, y: S.y }, T];
+    const n = ends.length, dx = Math.sign(spine[1].x - spine[0].x), dy = Math.sign(spine[1].y - spine[0].y), nl = { x: dy, y: -dx };
+    ends.sort((a, b) => (a.p1.x * nl.x + a.p1.y * nl.y) - (b.p1.x * nl.x + b.p1.y * nl.y));
+    ends.forEach((e, r) => {
+      const lane = offsetPolyline(spine, (r - (n - 1) / 2) * sp);
+      const h0 = Math.abs(lane[1].y - lane[0].y) < 0.01, e0 = lane.length - 1, h1 = Math.abs(lane[e0].y - lane[e0 - 1].y) < 0.01;
+      const c1 = h0 ? { x: lane[0].x, y: e.p1.y } : { x: e.p1.x, y: lane[0].y };
+      const c2 = h1 ? { x: lane[e0].x, y: e.p2.y } : { x: e.p2.x, y: lane[e0].y };
+      e.w.pts = simplify(orthogonalize([e.pa, e.p1, c1, ...lane, c2, e.p2, e.pb])).slice(1, -1);
+      if (e.ra !== e.w.a) e.w.pts.reverse();
+      e.w.bundle = id; this._drawWire(e.w);
+    });
+  }
+  /** axis-aligned box of a part on the canvas (with its rotation), grown by m px */
+  _partBox(p, m = 0) {
+    const [w, h] = p.size, sw = p.rot & 1, cx = p.left + w / 2, cy = p.top + h / 2, hw = (sw ? h : w) / 2, hh = (sw ? w : h) / 2;
+    return { x0: cx - hw - m, y0: cy - hh - m, x1: cx + hw + m, y1: cy + hh + m };
+  }
+  /** bundle the wires between the same two parts (the group of wire `id`, or every group with 2+ wires) */
+  bundleWires(id) {
+    let next = Math.max(0, ...this.wires.map((w) => w.bundle || 0)) + 1, n = 0;
+    for (const ws of this._wireGroups().values()) {
+      if (id !== undefined && !ws.some((w) => w.id === id)) continue;
+      if (ws.length < 2) { if (id === undefined) this._routeBundle(ws, 0); continue; }   // single wires: tidy obstacle-free route
+      this._routeBundle(ws, next++); n += ws.length;
+    }
+    this._drawTies(); if (n) this.emit('change', { structural: false });
+    const sw = this.selected?.kind === 'wire' && this.wires.find((x) => x.id === this.selected.id); if (sw) this._drawHandles(sw);
+    return n;
+  }
+  /** a moved part keeps its harnesses tidy */
+  _rerouteBundles(pid) {
+    const ids = new Set(this.wires.filter((w) => w.bundle && (w.a.startsWith(pid + ':') || w.b.startsWith(pid + ':'))).map((w) => w.bundle));
+    for (const b of ids) { const ws = this.wires.filter((w) => w.bundle === b); if (ws.length > 1) this._routeBundle(ws, b); }
+  }
+  unbundle(id) {
+    const w0 = this.wires.find((x) => x.id === id); if (!w0?.bundle) return 0;
+    const b = w0.bundle, ws = this.wires.filter((w) => w.bundle === b);
+    for (const w of ws) { w.bundle = 0; w.pts = []; this._drawWire(w); }
+    this._drawTies(); this.emit('change', { structural: false }); return ws.length;
+  }
+  /** cable ties across each bundle's shared trunk: [{ x, y, w, h, vertical, bundle }] in canvas px */
+  bundleTies() {
+    const out = [], by = new Map();
+    for (const w of this.wires) if (w.bundle && w.pts?.length >= 4) (by.get(w.bundle) || by.set(w.bundle, []).get(w.bundle)).push(w);
+    for (const [b, ws] of by) {
+      if (ws.length < 2) continue;
+      const segs = ws.map((w) => { let best = null; for (let i = 0; i < w.pts.length - 1; i++) { const p = w.pts[i], q = w.pts[i + 1], l = Math.hypot(q.x - p.x, q.y - p.y); if (!best || l > best.l) best = { p, q, l }; } return best; });
+      const vertical = Math.abs(segs[0].q.x - segs[0].p.x) < Math.abs(segs[0].q.y - segs[0].p.y);
+      const lo = Math.max(...segs.map((g) => Math.min(vertical ? g.p.y : g.p.x, vertical ? g.q.y : g.q.x))), hi = Math.min(...segs.map((g) => Math.max(vertical ? g.p.y : g.p.x, vertical ? g.q.y : g.q.x)));
+      if (hi - lo < 14) continue;
+      const across = segs.map((g) => (vertical ? g.p.x : g.p.y)), a0 = Math.min(...across) - 3.5, a1 = Math.max(...across) + 3.5;
+      const k = hi - lo > 140 ? [1 / 3, 2 / 3] : [0.5];
+      for (const f of k) { const c = lo + (hi - lo) * f; out.push(vertical ? { x: a0, y: c - 2, w: a1 - a0, h: 4, vertical, bundle: b } : { x: c - 2, y: a0, w: 4, h: a1 - a0, vertical, bundle: b }); }
+    }
+    return out;
+  }
+  _drawTies() {
+    if (!this.tiesG) return;
+    this.tiesG.replaceChildren();
+    for (const t of this.bundleTies()) {
+      const r = document.createElementNS(SVGNS, 'rect');
+      r.setAttribute('x', t.x); r.setAttribute('y', t.y); r.setAttribute('width', t.w); r.setAttribute('height', t.h); r.setAttribute('rx', 1.6); r.setAttribute('class', 'wire-tie');
+      this.tiesG.append(r);
+    }
+  }
 
   // ---------------------------------------------------------------- wire bend points
   /** handles of the selected wire: ● bend point (drag to move, double-tap to remove), + segment midpoint (drag to add a bend) */
@@ -349,7 +459,7 @@ export class CircuitCanvas {
     };
     const up = () => {
       el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up);
-      if (moved) { this._lastTap = null; this._drawHandles(w); this.emit('change', { structural: false }); }
+      if (moved) { this._lastTap = null; this._drawHandles(w); this._drawTies(); this.emit('change', { structural: false }); }
     };
     el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
   }
@@ -377,11 +487,12 @@ export class CircuitCanvas {
   /** tidy one wire (id) or all wires: orthogonal routes */
   tidyWires(id) {
     const ws = this.wires.filter((w) => !w.plug && (id === undefined || w.id === id));
-    for (const w of ws) { w.pts = this._tidyPts(w); this._drawWire(w); }
+    for (const w of ws) { w.pts = this._tidyPts(w); w.bundle = 0; this._drawWire(w); }
+    this._drawTies();
     if (ws.length) this.emit('change', { structural: false });
     return ws.length;
   }
-  clearBends(id) { const w = this.wires.find((x) => x.id === id); if (w && w.pts.length) { w.pts = []; this._drawWire(w); this.handlesSvg.replaceChildren(); this._drawHandles(w); this.emit('change', { structural: false }); } }
+  clearBends(id) { const w = this.wires.find((x) => x.id === id); if (w && w.pts.length) { w.pts = []; w.bundle = 0; this._drawWire(w); this._drawTies(); this.handlesSvg.replaceChildren(); this._drawHandles(w); this.emit('change', { structural: false }); } }
   _markWired() {
     const set = new Set(); for (const w of this.wires) { set.add(w.a); set.add(w.b); }
     for (const p of this.parts.values()) for (const d of p.pins.children) d.classList.toggle('wired', set.has(`${p.id}:${d.dataset.pin}`));
@@ -543,7 +654,7 @@ export class CircuitCanvas {
       }
       this._edgePan(null);
       if (drag) {
-        if (drag.moved) { this._plug(drag.part, !isBB(drag.part.type)); this._markWired(); this._redrawWires(); this.emit('change', { structural: false }); }
+        if (drag.moved) { this._plug(drag.part, !isBB(drag.part.type)); this._rerouteBundles(drag.part.id); this._markWired(); this._redrawWires(); this.emit('change', { structural: false }); }
         drag = null;
       }
       if (this.pending?.dragging) {

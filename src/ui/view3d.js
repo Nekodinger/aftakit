@@ -10,6 +10,7 @@
 // potentiometer directly on the model; tap any part for its info card (pins, connections, live state).
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { buildPart3D, SPEC, pcbEdgeColor } from './models3d.js';
 
 const MM = 1 / 3.7795;                                  // px → mm
 const BB_H = 8.5, PCB = 1.6, HEADER = 2.5;
@@ -219,100 +220,37 @@ export function init3D({ canvas, sim, host, catalog }) {
     let [w, h] = part.size;
     if (!w || !h) { const r = hostRect(part), z = canvas.zoom || 1; w ||= ((part.rot & 1) ? r.height : r.width) / z; h ||= ((part.rot & 1) ? r.width : r.height) / z; }
     if (!w || !h) { w ||= 20; h ||= 20; }
-    const group = new THREE.Group(), it = { part, group, kind: 'generic' };
-    group.userData.partId = part.id;
-    const base = baseOf(part, pl), cat = catalog[part.type] || {};
-    const pin = (n) => canvas.pinPos(`${part.id}:${n}`);
-    const W = w * MM, D = h * MM;
-    const placeCentered = (y) => { group.position.set((part.left + w / 2) * MM, y, (part.top + h / 2) * MM); group.rotation.y = -(part.rot & 3) * Math.PI / 2; };
-
+    const W = w * MM, D = h * MM, plug = pl.has(part.id);
     if (isBB(part.type)) {
-      placeCentered(0); it.kind = 'bb';
+      const group = new THREE.Group(), it = { part, group, kind: 'bb' }; group.userData.partId = part.id;
+      group.position.set((part.left + w / 2) * MM, 0, (part.top + h / 2) * MM); group.rotation.y = -(part.rot & 3) * Math.PI / 2;
       const body = new THREE.Mesh(new THREE.BoxGeometry(W, BB_H, D), new THREE.MeshStandardMaterial({ color: 0xf3f0e9, roughness: 0.9 }));
       body.position.y = BB_H / 2; body.castShadow = true; body.receiveShadow = true; group.add(body);
       texturedTop(part, it, W, D, BB_H, { noBody: true });
       return it;
     }
-    if (part.type === 'wokwi-led' && pin('A') && pin('C')) {
-      it.kind = 'led';
-      const a = pin('A'), c = pin('C'), mid = { x: (a.x + c.x) / 2, y: (a.y + c.y) / 2 };
-      group.position.copy(toV(mid, base)); group.rotation.y = -Math.atan2(c.y - a.y, c.x - a.x);
-      const col = new THREE.Color(LED_RGB[part.el.color] || part.el.color || '#ff2a2a');
-      const lift = base > 0 ? 3 : 4, len = Math.hypot(c.x - a.x, c.y - a.y) * MM;
-      const lens = new THREE.MeshPhysicalMaterial({ color: col, transparent: true, opacity: 0.78, roughness: 0.15, transmission: 0.2, emissive: col, emissiveIntensity: 0 });
-      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 5.2, 28), lens); cyl.position.y = lift + 2.6;
-      const dome = new THREE.Mesh(new THREE.SphereGeometry(2.5, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), lens); dome.position.y = lift + 5.2;
-      const rim = new THREE.Mesh(new THREE.CylinderGeometry(2.9, 2.9, 1, 28), lens); rim.position.y = lift + 0.5;
-      const legM = new THREE.MeshStandardMaterial({ color: 0xc8c8c8, metalness: 0.9, roughness: 0.35 });
-      for (const [sx, l] of [[-len / 2, lift + 0.4], [len / 2, lift + 0.4]]) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, l, 6), legM); leg.position.set(sx, l / 2, 0); group.add(leg); }
-      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: col, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
-      glow.scale.set(16, 16, 1); glow.position.y = lift + 4;
-      const light = new THREE.PointLight(col, 0, 60, 2); light.position.y = lift + 4;
-      for (const m of [cyl, dome, rim]) { m.castShadow = true; group.add(m); }
-      group.add(glow, light); Object.assign(it, { lens, glow, light });
-      return it;
-    }
-    if (part.type === 'wokwi-resistor' && pin('1') && pin('2')) {
-      it.kind = 'res';
-      const a = pin('1'), c = pin('2'), mid = { x: (a.x + c.x) / 2, y: (a.y + c.y) / 2 }, len = Math.hypot(c.x - a.x, c.y - a.y) * MM;
-      group.position.copy(toV(mid, base)); group.rotation.y = -Math.atan2(c.y - a.y, c.x - a.x);
-      const y0 = 2.6, bodyL = Math.min(6.3, len * 0.7);
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(1.15, bodyL - 2.3, 6, 18), new THREE.MeshStandardMaterial({ color: 0xd8c3a0, roughness: 0.7 }));
-      body.rotation.z = Math.PI / 2; body.position.y = y0; body.castShadow = true; group.add(body);
-      resistorBands(part.attrs?.value ?? part.el.value).forEach((bc, i) => {
-        const r = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.45, 18), new THREE.MeshStandardMaterial({ color: bc, roughness: 0.5 }));
-        r.rotation.z = Math.PI / 2; r.position.set(-bodyL / 2 + 1.0 + i * (i === 3 ? 1.35 : 0.95), y0, 0); group.add(r);
-      });
-      const legM = new THREE.MeshStandardMaterial({ color: 0xbdbdbd, metalness: 0.9, roughness: 0.35 });
-      for (const s of [-1, 1]) {
-        const hz = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, len / 2 - bodyL / 2 + 0.3, 6), legM); hz.rotation.z = Math.PI / 2; hz.position.set(s * (len / 2 + bodyL / 2) / 2, y0, 0); group.add(hz);
-        const vt = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, y0, 6), legM); vt.position.set(s * len / 2, y0 / 2, 0); group.add(vt);
+    // live artwork texture (fixed size canvas, redrawn in place when the element changes)
+    const k = Math.min(4, 2048 / Math.max(w, h)), cv = document.createElement('canvas'); cv.width = Math.ceil(w * k); cv.height = Math.ceil(h * k);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    const m = buildPart3D({ part, W, D, tex, plugged: plug, catalog, glowTex: glowTex() });
+    const group = m.root;
+    group.position.set((part.left + w / 2) * MM, (plug ? BB_H : 0) + m.lift, (part.top + h / 2) * MM); group.rotation.y = -(part.rot & 3) * Math.PI / 2;
+    group.updateMatrixWorld(true);
+    const it = { part, group, kind: m.kind, model: m, contacts: m.contacts, tex, cv, standing: m.standing };
+    it.refresh = async () => {
+      const snap = await snapshot(part, canvas.zoom || 1, [w, h]); if (!snap || items.get(part.id) !== it) return;
+      const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height); g.drawImage(snap, 0, 0, cv.width, cv.height); tex.needsUpdate = true;
+      if (!it.colored && m.pcbSide) { it.colored = true; const c = pcbEdgeColor(cv, SPEC[part.type]?.pcb || null); if (c) m.pcbSide.color.copy(c); }
+      if (m.lenses) for (const L of m.lenses) {                     // module LEDs: glow when the artwork shows them lit
+        const d = g.getImageData(Math.min(cv.width - 1, L.fx * cv.width), Math.min(cv.height - 1, L.fy * cv.height), 1, 1).data;
+        const lum = (Math.max(d[0], d[1], d[2]) - Math.min(d[0], d[1], d[2])) / 255; L.m.emissiveIntensity = lum > 0.45 && Math.max(d[0], d[1], d[2]) > 150 ? 1.4 : 0;
       }
-      return it;
-    }
-    if (/^wokwi-pushbutton/.test(part.type)) {
-      it.kind = 'button'; placeCentered(base);
-      const six = /6mm/.test(part.type), S = six ? 6 : 12;
-      const b = new THREE.Mesh(new THREE.BoxGeometry(S, 3.4, S), new THREE.MeshStandardMaterial({ color: 0x1d1d1d, roughness: 0.6 })); b.position.y = 1.7; b.castShadow = true; group.add(b);
-      const plate = new THREE.Mesh(new THREE.BoxGeometry(S * 0.96, 0.3, S * 0.96), new THREE.MeshStandardMaterial({ color: 0xb0b0b0, metalness: 0.8, roughness: 0.3 })); plate.position.y = 3.5; group.add(plate);
-      const capCol = { red: 0xd32f2f, green: 0x2e7d32, blue: 0x1565c0, yellow: 0xf9c80e, white: 0xf2f2f2, black: 0x222222 }[part.el.color] ?? 0xd32f2f;
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(S * 0.29, S * 0.31, 3, 28), new THREE.MeshStandardMaterial({ color: capCol, roughness: 0.45 })); cap.position.y = 5; cap.castShadow = true; group.add(cap);
-      it.cap = cap; it.pick = cap;
-      return it;
-    }
-    if (part.type === 'wokwi-potentiometer') {
-      it.kind = 'pot'; placeCentered(base);
-      const b = new THREE.Mesh(new THREE.BoxGeometry(9.8, 6.5, 10), new THREE.MeshStandardMaterial({ color: 0x1f4fa8, roughness: 0.6 })); b.position.y = 3.25; b.castShadow = true; group.add(b);
-      const knob = new THREE.Group(); knob.position.y = 6.5;
-      const sh = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 7, 24), new THREE.MeshStandardMaterial({ color: 0xd9d9d9, metalness: 0.6, roughness: 0.35 })); sh.position.y = 3.5; sh.castShadow = true;
-      const mark = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 2.6), new THREE.MeshStandardMaterial({ color: 0x222222 })); mark.position.set(0, 7.1, -1.6);
-      knob.add(sh, mark); group.add(knob); it.knob = knob; it.pick = b;
-      return it;
-    }
-    if (part.type === 'wokwi-buzzer') {
-      it.kind = 'buzzer'; placeCentered(base);
-      const r = Math.min(W, D) * 0.45;
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 7.5, 36), new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.55 })); b.position.y = 3.75; b.castShadow = true; group.add(b);
-      const hole = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.18, r * 0.18, 0.2, 20), new THREE.MeshStandardMaterial({ color: 0x000000 })); hole.position.y = 7.55; group.add(hole);
-      return it;
-    }
-    // generic: textured slab / extruded artwork; boards on a breadboard stand on header pins
-    const isBoard = !!cat.board || cat.cat === 'Mikrokontroler';
-    const T = isBoard ? PCB : /lcd|oled|ssd1306|ili9341|tft|display|7segment|matrix/i.test(part.type) ? 3.2 : /sensor|module|mod-/.test(part.type) ? 1.8 : 2.4;
-    let y = base;
-    if (isBoard && base > 0) {
-      y = base + HEADER;
-      const hm = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.7 });
-      const geo = new THREE.BoxGeometry(2.4, HEADER, 2.4);
-      for (const pi of part.pinInfo) {
-        const q = pin(pi.name); if (!q) continue;
-        const m = new THREE.Mesh(geo, hm); m.position.set(q.x * MM, base + HEADER / 2, q.y * MM); m.castShadow = true; it.headers ||= []; it.headers.push(m);
-      }
-    }
-    placeCentered(y);
-    texturedTop(part, it, W, D, T);
-    if (it.headers) { const hg = new THREE.Group(); hg.userData.partId = part.id; for (const m of it.headers) hg.add(m); it.headerGroup = hg; }
-    it.T = T;
+      it.last = performance.now();
+    };
+    it.dirty = true;
+    const r = part.el.shadowRoot || part.el;
+    it.obs = new MutationObserver(() => { it.dirty = true; }); it.obs.observe(r, { subtree: true, attributes: true, childList: true, characterData: true });
+    it.hasCanvas = !!r.querySelector('canvas');
     return it;
   }
 
@@ -324,30 +262,61 @@ export function init3D({ canvas, sim, host, catalog }) {
     g.fillStyle = gr; g.fillRect(0, 0, 64, 64); _glow = new THREE.CanvasTexture(c); return _glow;
   }
 
-  /** height of a pin's contact point (where a wire lands) */
-  function pinY(ref, pl) {
-    const pid = ref.slice(0, ref.lastIndexOf(':')), it = items.get(pid), part = canvas.parts.get(pid); if (!part) return 0;
-    if (isBB(part.type)) return BB_H;
-    const base = baseOf(part, pl);
-    if (it?.kind === 'led' || it?.kind === 'res') return base;
-    if (it?.kind === 'button' || it?.kind === 'pot' || it?.kind === 'buzzer') return base + 0.5;
-    return (it?.group.position.y ?? base) + (it?.T ?? 2) + 0.3;
+  /** world position where a wire lands on a pin (contact marker of the model, or the breadboard hole) */
+  function contactOf(ref) {
+    const pid = ref.slice(0, ref.lastIndexOf(':')), pin = ref.slice(ref.lastIndexOf(':') + 1), it = items.get(pid), q = canvas.pinPos(ref);
+    if (!q) return null;
+    if (it?.kind === 'bb') return toV(q, BB_H);
+    const c = it?.contacts?.get(pin);
+    if (c) { const v3 = c.getWorldPosition(new THREE.Vector3()); if (it.standing) { v3.x = q.x * MM; v3.z = q.y * MM; } return v3; }
+    return toV(q, 2);
+  }
+  function roundedPath(P, r) {
+    const path = new THREE.CurvePath();
+    let prev = P[0];
+    for (let i = 1; i < P.length - 1; i++) {
+      const a = P[i - 1], b = P[i], c = P[i + 1], d1 = b.clone().sub(a), d2 = c.clone().sub(b), l1 = d1.length(), l2 = d2.length();
+      const k = Math.min(r, l1 / 2, l2 / 2), p1 = b.clone().sub(d1.normalize().multiplyScalar(k)), p2 = b.clone().add(d2.normalize().multiplyScalar(k));
+      if (prev.distanceTo(p1) > 0.01) path.add(new THREE.LineCurve3(prev, p1));
+      path.add(new THREE.QuadraticBezierCurve3(p1, b, p2)); prev = p2;
+    }
+    path.add(new THREE.LineCurve3(prev, P[P.length - 1]));
+    return path;
   }
   function buildWires(pl) {
     for (const c of [...wiresGroup.children]) { disposeObj(c); wiresGroup.remove(c); }
+    const bundleHop = new Map();                                     // wires of one harness run at one height
+    for (const w of canvas.wires) {
+      if (w.plug || !w.bundle) continue; const A = contactOf(w.a), B = contactOf(w.b); if (!A || !B) continue;
+      bundleHop.set(w.bundle, Math.max(bundleHop.get(w.bundle) || 0, Math.max(A.y, B.y) + 10));
+    }
     for (const w of canvas.wires) {
       if (w.plug) continue;
       const pa = canvas.pinPos(w.a), pb = canvas.pinPos(w.b); if (!pa || !pb) continue;
-      const ya = pinY(w.a, pl), yb = pinY(w.b, pl), A = toV(pa, ya), B = toV(pb, yb);
-      const dist = A.distanceTo(B), hop = Math.max(ya, yb) + Math.min(22, Math.max(4, dist * 0.18));
-      const pts = [A, A.clone().setY(ya + 2.5)];
+      const A = contactOf(w.a), B = contactOf(w.b); if (!A || !B) continue; const ya = A.y, yb = B.y;
+      const dist = A.distanceTo(B), hop = w.bundle && bundleHop.has(w.bundle) ? bundleHop.get(w.bundle) : Math.max(ya, yb) + 7 + Math.min(22, Math.max(4, dist * 0.18));
+      const pts = [A, A.clone().setY(ya + 7.5)];
       if (w.pts?.length) for (const q of w.pts) pts.push(toV(q, hop));
       else { const m = A.clone().lerp(B, 0.5); m.y = hop + 2; pts.push(A.clone().lerp(B, 0.2).setY(hop), m, A.clone().lerp(B, 0.8).setY(hop)); }
-      pts.push(B.clone().setY(yb + 2.5), B);
-      const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.5);
-      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(220, 24 + pts.length * 14), 0.55, 8, false), new THREE.MeshStandardMaterial({ color: new THREE.Color(w.color || '#3d8bfd'), roughness: 0.45 }));
+      pts.push(B.clone().setY(yb + 7.5), B.clone().setY(yb + 7));
+      pts[0] = A.clone().setY(ya + 7);
+      let curve;
+      if (w.pts?.length) {                                            // routed wire: straight runs with small rounded corners
+        const P = [A.clone().setY(ya + 7), A.clone().setY(hop), ...w.pts.map((q) => toV(q, hop)), B.clone().setY(hop), B.clone().setY(yb + 7)];
+        curve = roundedPath(P.filter((q, i) => i === 0 || q.distanceTo(P[i - 1]) > 0.05), 2.2);
+      } else curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.5);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(360, 24 + (w.pts?.length || 0) * 24 + pts.length * 14), 0.55, 8, false), new THREE.MeshStandardMaterial({ color: new THREE.Color(w.color || '#3d8bfd'), roughness: 0.45 }));
       tube.castShadow = true; tube.userData.wire = w.id; wiresGroup.add(tube);
-      for (const P of [A, B]) { const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 2.2, 10), new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 })); tip.position.copy(P).setY(P.y + 1.4); wiresGroup.add(tip); }
+      if (w.bundle) tube.userData.bundle = w.bundle;
+      for (const P of [A, B]) {                                        // Dupont housing on each end
+        const tip = new THREE.Mesh(new THREE.BoxGeometry(2.5, 7, 2.5), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6 })); tip.position.copy(P).setY(P.y + 3.6); tip.castShadow = true; wiresGroup.add(tip);
+      }
+    }
+    for (const t of canvas.bundleTies?.() || []) {                   // cable ties around each harness
+      const y = bundleHop.get(t.bundle); if (y == null) continue;
+      const tie = new THREE.Mesh(new THREE.BoxGeometry(t.w * MM + 0.8, 1.9, t.h * MM + 0.8), new THREE.MeshStandardMaterial({ color: 0x1b1b1d, roughness: 0.5 }));
+      tie.position.set((t.x + t.w / 2) * MM, y, (t.y + t.h / 2) * MM); tie.castShadow = true; wiresGroup.add(tie);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 2.2), tie.material); head.position.copy(tie.position); head.position[t.vertical ? 'x' : 'z'] += (t.vertical ? t.w : t.h) * MM / 2 + 1.1; wiresGroup.add(head);
     }
   }
 
@@ -356,15 +325,7 @@ export function init3D({ canvas, sim, host, catalog }) {
     let budget = 3;
     for (const it of items.values()) {
       const el = it.part.el;
-      if (it.kind === 'led') {
-        const on = !!el.value, br = on ? Math.max(0.15, Math.min(1, +(el.brightness ?? 1) || 1)) : 0;
-        it.lens.emissiveIntensity = 0.1 + 1.6 * br; it.glow.material.opacity = 0.85 * br; it.light.intensity = 900 * br;
-      } else if (it.kind === 'button') {
-        it.cap.position.y = el.pressed ? 4.1 : 5;
-      } else if (it.kind === 'pot') {
-        const f = ((+el.value || 0) - (el.min ?? 0)) / (((el.max ?? 1023) - (el.min ?? 0)) || 1);
-        it.knob.rotation.y = -(-135 + 270 * Math.min(1, Math.max(0, f))) * Math.PI / 180;
-      }
+      it.model?.update?.();
       if (it.refresh && budget > 0) {
         const due = it.dirty || (it.hasCanvas && sim.running && now - (it.last || 0) > 120);
         if (due && now - (it.last || 0) > 70 && !it.busy) { it.dirty = false; it.busy = true; budget--; it.refresh().finally(() => { it.busy = false; }); }
@@ -379,8 +340,8 @@ export function init3D({ canvas, sim, host, catalog }) {
     const w = host.clientWidth, h = host.clientHeight;
     for (const it of items.values()) {
       if (!it.label) continue;
-      const b = new THREE.Box3().setFromObject(it.group); if (b.isEmpty()) continue;
-      b.getCenter(v); v.y = b.max.y + 2; v.project(camera);
+      if (!it.anchor) { const b = new THREE.Box3().setFromObject(it.group); if (b.isEmpty()) continue; it.anchor = b.getCenter(new THREE.Vector3()); it.anchor.y = b.max.y + 3; }
+      v.copy(it.anchor); v.project(camera);
       const vis = v.z < 1 && v.x > -1.1 && v.x < 1.1 && v.y > -1.1 && v.y < 1.1;
       it.label.style.display = vis ? '' : 'none';
       if (vis) it.label.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * h}px) translate(-50%, -100%)`;
@@ -435,14 +396,14 @@ export function init3D({ canvas, sim, host, catalog }) {
         controls.enabled = false; act = { kind: 'button', it };
         it.part.el.pressed = true; it.part.el.dispatchEvent(new Event('button-press'));
         try { glCanvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
-      } else if (it.kind === 'pot') {
+      } else if (it.kind === 'pot' || it.kind === 'slidepot') {
         controls.enabled = false; act = { kind: 'pot', it, x: e.clientX, v0: +it.part.el.value || 0 };
         try { glCanvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
       }
     }, true);
     glCanvas.addEventListener('pointermove', (e) => {
       if (act?.kind === 'pot') {
-        const el = act.it.part.el, mn = el.min ?? 0, mx = el.max ?? 1023;
+        const el = act.it.part.el, mn = el.min ?? 0, mx = el.max ?? (act.it.kind === 'slidepot' ? 100 : 1023);
         el.value = Math.round(Math.min(mx, Math.max(mn, act.v0 + ((e.clientX - act.x) / 220) * (mx - mn))));
         el.dispatchEvent(new InputEvent('input', { bubbles: true }));
       }

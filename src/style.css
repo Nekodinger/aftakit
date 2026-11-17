@@ -464,3 +464,20 @@ dialog.pm-dlg form { max-height: 90vh; display: flex; flex-direction: column; }
 @media (max-width: 700px) { .pm-top { flex-wrap: wrap; } .pm-bar .btn { margin-left: 0; } .pm-table thead th { min-width: 140px; } .pm-sel { min-width: 130px; } }
 :root[data-theme="dark"] .pm-tag.i2c, :root[data-theme="dark"] .pm-tag.spi, :root[data-theme="dark"] .pm-tag.uart, :root[data-theme="dark"] .pm-tag.adc, :root[data-theme="dark"] .pm-tag.pwr, :root[data-theme="dark"] .pm-tag.gnd { background: var(--panel-2); border-color: var(--line); }
 .pm-chk { white-space: nowrap; }
+.wire-tie { fill: #1d1d1f; stroke: #ffffff66; stroke-width: .6; pointer-events: none; }
+
+/* ---------- PCB designer */
+#pcbView { position: absolute; inset: 0; z-index: 9; background: #20242c; overflow: hidden; touch-action: none; }
+#pcbView[hidden] { display: none; }
+#pcbView .pcb-cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#pcbView.busy .pcb-cv { cursor: progress; }
+.pcb-side { position: absolute; right: 12px; top: 112px; bottom: 56px; width: 290px; overflow: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); font-size: 13px; display: flex; flex-direction: column; gap: 9px; }
+.pcb-head { display: flex; flex-direction: column; gap: 2px; } .pcb-head b { font-size: 15px; } .pcb-size { color: var(--muted); font-size: 12px; }
+.pcb-actions, .pcb-export { display: flex; flex-wrap: wrap; gap: 6px; } .pcb-export .btn { flex: 1 1 100%; justify-content: center; }
+.pcb-layers { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 12px; } .pcb-layers label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.pcb-ok { color: #17803f; font-weight: 600; } .pcb-warn { color: #9a6400; font-weight: 600; } .pcb-bad { color: #c62828; font-weight: 600; } .pcb-busy { color: var(--accent); font-weight: 600; }
+.pcb-drc ul { margin: 4px 0 0; padding-left: 16px; font-size: 12px; color: var(--muted); }
+.pcb-close { position: absolute; left: 12px; top: 64px; }
+#tbPcb.on { color: var(--accent); background: #3f51b51a; }
+body.mode-pcb #toolbar .tb-group:not(.run-group):not(.v3-keep) { display: none; }
+@media (max-width: 760px) { .pcb-side { top: auto; bottom: 56px; left: 12px; width: auto; max-height: 42%; } }
