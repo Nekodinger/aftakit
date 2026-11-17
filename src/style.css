@@ -416,3 +416,51 @@ dialog.wide { width: min(720px, 96vw); }
 body.mode-3d #toolbar .tb-group:not(.run-group):not(.v3-keep) { display: none; }
 @media (max-width: 760px) { .v3-help { display: none; } .v3-info { top: auto; bottom: 104px; max-height: 45%; } }
 .v3-help { transition: opacity .6s; } .v3-help.fade { opacity: 0; }
+
+/* ---------- pin table (Sambung kabel) */
+dialog.pm-dlg { width: min(1100px, 97vw); }
+dialog.pm-dlg form { max-height: 90vh; display: flex; flex-direction: column; }
+.pm-top { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+.pm-top h3 { margin: 0; }
+.pm-tabs { display: flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
+.pm-tabs button { border: 0; background: transparent; color: var(--muted); font: 600 13px/1 inherit; padding: 7px 14px; border-radius: 7px; cursor: pointer; }
+.pm-tabs button.on { background: var(--panel); color: var(--accent); box-shadow: 0 1px 3px #0002; }
+.pm-close { margin-left: auto; }
+#pmHost { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#pmHost[hidden] { display: none; }
+.pm-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 8px; font-size: 13px; }
+.pm-bar select { margin-left: 6px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; }
+.pm-bar .btn { margin-left: auto; }
+.pm-chk { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.pm-scroll { overflow: auto; border: 1px solid var(--line); border-radius: 10px; min-height: 200px; max-height: 62vh; -webkit-overflow-scrolling: touch; }
+.pm-table { border-collapse: separate; border-spacing: 0; font-size: 13px; width: max-content; min-width: 100%; }
+.pm-table th, .pm-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; background: var(--panel); }
+.pm-table thead th { position: sticky; top: 0; z-index: 2; background: var(--panel-2); vertical-align: top; min-width: 170px; }
+.pm-table .pm-corner { left: 0; z-index: 3; min-width: 150px; font-size: 11px; color: var(--muted); font-weight: 600; }
+.pm-table th.pm-pin { position: sticky; left: 0; z-index: 1; min-width: 150px; box-shadow: 1px 0 0 var(--line); }
+.pm-pin b { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+.pm-gpio { margin-left: 6px; font-size: 11px; color: var(--muted); }
+.pm-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+.pm-tag { font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.pm-tag.i2c { background: #e8f0ff; color: #2851c7; border-color: #c9d8ff; } .pm-tag.spi { background: #f3e8ff; color: #7b2fc0; border-color: #e2cdfa; }
+.pm-tag.uart { background: #e6f7f4; color: #11806f; border-color: #c4ebe3; } .pm-tag.adc { background: #fff4e0; color: #9a6400; border-color: #f6dfb2; }
+.pm-tag.pwr { background: #ffe9ec; color: #c2183c; border-color: #fbc7d0; } .pm-tag.gnd { background: #ececec; color: #333; }
+.pm-tag.warn { background: #fff1f0; color: #c62828; border-color: #f7cfcb; }
+.pm-sec td { position: sticky; left: 0; background: var(--panel-2) !important; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 8px; }
+.pm-ch { display: flex; flex-direction: column; gap: 3px; }
+.pm-ch b { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-ch code { font-size: 11px; color: var(--muted); }
+.pm-prog { font-size: 11px; color: var(--muted); } .pm-prog.ok { color: #17803f; font-weight: 600; }
+.pm-miss { font-size: 11px; color: #c62828; }
+.pm-auto { align-self: flex-start; border: 1px solid var(--accent); color: var(--accent); background: transparent; border-radius: 7px; padding: 3px 9px; font: 600 11.5px/1.3 inherit; cursor: pointer; }
+.pm-auto:hover { background: #3f51b514; }
+.pm-sel { width: 100%; min-width: 150px; padding: 6px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); font: 13px inherit; min-height: 34px; }
+.pm-sel.on { color: var(--text); font-weight: 600; border-color: var(--accent); background: #3f51b50d; }
+.pm-sel.on.r-power { border-color: #e11d48; background: #e11d480d; } .pm-sel.on.r-gnd { border-color: #1f2937; background: #1f29370d; }
+.pm-via { font-size: 12px; font-weight: 600; padding: 4px 6px; border: 1px dashed var(--line-2); border-radius: 8px; } .pm-via small { display: block; font-weight: 400; color: var(--muted); font-size: 10.5px; }
+.pm-more { color: var(--muted); font-size: 11px; }
+.pm-note { margin: 8px 0 0; }
+.pm-empty { padding: 28px; text-align: center; color: var(--muted); border: 1px dashed var(--line-2); border-radius: 10px; }
+@media (max-width: 700px) { .pm-top { flex-wrap: wrap; } .pm-bar .btn { margin-left: 0; } .pm-table thead th { min-width: 140px; } .pm-sel { min-width: 130px; } }
+:root[data-theme="dark"] .pm-tag.i2c, :root[data-theme="dark"] .pm-tag.spi, :root[data-theme="dark"] .pm-tag.uart, :root[data-theme="dark"] .pm-tag.adc, :root[data-theme="dark"] .pm-tag.pwr, :root[data-theme="dark"] .pm-tag.gnd { background: var(--panel-2); border-color: var(--line); }
+.pm-chk { white-space: nowrap; }

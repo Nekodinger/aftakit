@@ -62,7 +62,7 @@
                 <hr /><button data-act="rotate">Putar komponen <kbd>R</kbd></button>
                 <button data-act="duplicate">Duplikat <kbd>Ctrl D</kbd></button>
                 <button data-act="delete">Hapus <kbd>Del</kbd></button>
-                <hr /><button data-act="wire-text">Sambung kabel dengan teks…</button><button data-act="tidy-wires">Rapikan semua kabel</button><hr /><button data-act="clear-wires">Hapus semua kabel</button>
+                <hr /><button data-act="wire-text">Sambung kabel (tabel pin)…</button><button data-act="tidy-wires">Rapikan semua kabel</button><hr /><button data-act="clear-wires">Hapus semua kabel</button>
               </div></div>
             <div class="menu" id="menuHelp"><button class="mb">Bantuan</button>
               <div class="menu-pop">
@@ -155,7 +155,7 @@
             </div>
             <div class="tb-group v3-keep">
               <button id="tb3d" class="tb" title="Tampilan 3D (simulasi tetap berjalan)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg><span>3D</span></button>
-              <button id="tbWireText" class="tb" title="Sambung kabel dengan mengetik (mis. esp32:D21 - oled1:SDA)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg><span>Ketik</span></button>
+              <button id="tbWireText" class="tb" title="Sambung kabel lewat tabel pin mikrokontroler ↔ komponen (atau ketik teks)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="18" rx="1.5"/><path d="M10 7h4M10 12h4M10 17h4"/><rect x="14" y="5" width="7" height="14" rx="1.5"/></svg><span>Sambung</span></button>
             </div>
             <div class="tb-group">
               <button id="tbGrid" class="tb on" title="Jepret ke grid"><svg><use href="#i-grid"/></svg></button>
@@ -274,12 +274,15 @@
     <label>URL kompilator <span class="muted small">(kosongkan = kompilator bawaan situs ini)</span><input id="setUrl" placeholder="kosong = bawaan (/api/cc)" /></label>
     <p class="muted small" id="setStatus"></p>
     <menu><button class="btn" value="cancel">Batal</button><button class="btn" id="setTest" type="button">Tes koneksi</button><button class="btn primary" id="setSave" value="ok">Simpan</button></menu></form></dialog>
-  <dialog id="dlgWires" class="wide"><form method="dialog"><h3>Sambung kabel dengan teks</h3>
-    <p class="muted small">Satu kabel per baris: <code>pinA - pinB [warna]</code>. Contoh: <code>esp32:D21 - oled1:SDA kuning</code>, <code>esp32:GND ke bb1:-</code>, <code>bb1:a10 - led1:A</code>, <code>D22 -&gt; SCL</code>. Pemisah: <code>-</code>, <code>-&gt;</code>, <code>ke</code>, <code>to</code>. Pin yang hanya ada di satu komponen boleh ditulis tanpa id. Breadboard: lubang <code>a1</code>…<code>j30</code>, rel <code>+</code> / <code>-</code> / <code>TP</code> / <code>TN</code> / <code>BP</code> / <code>BN</code> (dipilih lubang terdekat). Baris diawali <code>#</code> = komentar.</p>
-    <textarea id="wtText" rows="10" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="esp32:D21 - oled1:SDA kuning&#10;esp32:D22 - oled1:SCL hijau&#10;esp32:3V3 - oled1:VCC merah&#10;esp32:GND - oled1:GND hitam"></textarea>
+  <dialog id="dlgWires" class="wide pm-dlg"><form method="dialog"><div class="pm-top"><h3>Sambung kabel</h3><div class="pm-tabs" role="tablist"><button type="button" class="on" data-pmt="table" role="tab">Tabel pin</button><button type="button" data-pmt="text" role="tab">Teks</button></div><button class="btn pm-close" value="cancel" title="Tutup">✕</button></div>
+    <div id="pmHost" data-pmp="table"></div>
+    <div data-pmp="text" hidden>
+    <p class="muted small">Satu kabel per baris: <code>pinA - pinB [warna]</code>. Contoh: <code>esp32:D21 - oled1:SDA kuning</code>, <code>esp32:GND ke bb1:-</code>, <code>bb1:a10 - led1:A</code>. Pemisah: <code>-</code>, <code>-&gt;</code>, <code>ke</code>, <code>to</code>. Breadboard: lubang <code>a1</code>…<code>j30</code>, rel <code>+</code> / <code>-</code>. Baris diawali <code>#</code> = komentar.</p>
+    <textarea id="wtText" rows="9" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="esp32:D21 - oled1:SDA kuning&#10;esp32:D22 - oled1:SCL hijau&#10;esp32:3V3 - oled1:VCC merah&#10;esp32:GND - oled1:GND hitam"></textarea>
     <div id="wtParts" class="muted small"></div>
     <div id="wtResult" class="wt-result"></div>
-    <menu><button type="button" class="btn" id="wtExport" title="Isi kotak dengan kabel yang sudah ada">Ambil dari rangkaian</button><button type="button" class="btn" id="wtCheck">Periksa</button><button class="btn" value="cancel">Tutup</button><button type="button" class="btn primary" id="wtApply">Sambungkan</button></menu></form></dialog>
+    <menu><button type="button" class="btn" id="wtExport" title="Isi kotak dengan kabel yang sudah ada">Ambil dari rangkaian</button><button type="button" class="btn" id="wtCheck">Periksa</button><button type="button" class="btn primary" id="wtApply">Sambungkan</button></menu>
+    </div></form></dialog>
   <dialog id="dlgHelp"><form method="dialog"><h3 id="helpTitle">Cara pakai</h3><div id="helpBody" class="help"></div><menu><button class="btn primary">Mengerti</button></menu></form></dialog>
   <input type="file" id="fileIn" hidden />
   <div id="dragGhost" hidden></div>

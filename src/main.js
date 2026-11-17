@@ -1,4 +1,5 @@
 import { parseWiring, applyWiring, wiringToText } from './ui/wiretext.js';
+import { initPinMap } from './ui/pinmap.js';
 import '@wokwi/elements';
 import './style.css';
 import { registerParts } from './parts/index.js';
@@ -812,13 +813,23 @@ renderPalette(); renderProps(); updateBoardInfo(); updateBuildView();
 })();
 
 // ---------------------------------------------------------------- wiring by typing
+let pinMap = null;
+function wireTab(t) {
+  $$('[data-pmt]').forEach((b) => b.classList.toggle('on', b.dataset.pmt === t));
+  $$('[data-pmp]').forEach((p) => (p.hidden = p.dataset.pmp !== t));
+  if (t === 'table') pinMap.render();
+}
+$$('[data-pmt]').forEach((b) => (b.onclick = () => wireTab(b.dataset.pmt)));
+canvas.on('change', () => { if ($('#dlgWires').open && !$('#pmHost').hidden) pinMap?.render(); });
 function openWireText() {
   const dlg = $('#dlgWires');
+  pinMap ||= initPinMap({ canvas, catalog: BY_TAG, host: $('#pmHost'), toast });
+  wireTab('table');
   $('#wtResult').innerHTML = '';
   const parts = [...canvas.parts.values()];
   $('#wtParts').innerHTML = parts.length ? 'Komponen: ' + parts.map((p) => `<code title="${esc(BY_TAG[p.type]?.name || p.type)}">${esc(p.id)}</code>`).join(' ') : 'Kanvas masih kosong: tambahkan komponen dulu.';
   $('#wtParts').querySelectorAll('code').forEach((c) => (c.onclick = () => { const t = $('#wtText'); const at = t.selectionStart ?? t.value.length; t.setRangeText(c.textContent + ':', at, at, 'end'); t.focus(); }));
-  dlg.showModal(); $('#wtText').focus();
+  dlg.showModal();
 }
 function wtReport(res, applied) {
   const lines = [];

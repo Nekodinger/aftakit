@@ -14,7 +14,7 @@ with sync_playwright() as p:
       await c.addPart('wokwi-led', 900, 420); await c.addPart('wokwi-resistor', 900, 520); }""")
     pg.wait_for_timeout(300)
     ids = pg.evaluate("() => [...window.__sim.canvas.parts.values()].map(p=>p.id+'='+p.type)"); print(ids)
-    pg.click('#tbWireText'); pg.wait_for_timeout(200)
+    pg.click('#tbWireText'); pg.wait_for_timeout(200); pg.click('[data-pmt=text]'); pg.wait_for_timeout(100)
     ok(pg.evaluate("document.querySelector('#dlgWires').open"), "dialog opens from toolbar")
     text = """# OLED I2C
 esp32:D21 - ssd1:DATA kuning
