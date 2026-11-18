@@ -294,7 +294,12 @@ export class CircuitCanvas {
     color = plug ? '#0000' : (color || this._autoColor(a, b)); path.style.stroke = color;
     g.append(hit, under, path);
     const w = { id: this.nextWire++, a, b, color, g, hit, under, path, plug, pts: (pts || []).map((q) => (Array.isArray(q) ? { x: +q[0], y: +q[1] } : { x: +q.x, y: +q.y })).filter((q) => Number.isFinite(q.x) && Number.isFinite(q.y)) };
-    if (!plug) g.addEventListener('pointerdown', (e) => { if (this.pending) return; e.stopPropagation(); this.select({ kind: 'wire', id: w.id }); this.viewport.focus({ preventScroll: true }); });
+    if (!plug) g.addEventListener('pointerdown', (e) => {
+      if (this.pending) return; e.stopPropagation();
+      if (!(this.selected?.kind === 'wire' && this.selected.id === w.id)) this.select({ kind: 'wire', id: w.id });
+      this.viewport.focus({ preventScroll: true });
+      if (e.button === 0 || e.pointerType !== 'mouse') this._dragWire(e, w, 'seg', this._nearestSeg(w, this.toWorld(e.clientX, e.clientY)));
+    });
     this.wiresSvg.insertBefore(g, this.tiesG);
     this.wires.push(w); if (!plug) this._drawWire(w); this._markWired();
     return w;
@@ -342,7 +347,7 @@ export class CircuitCanvas {
     if (w.plug) return;
     const pa = this.pinPos(w.a), pb = this.pinPos(w.b); if (!pa || !pb) return;
     const d = this._wireD(pa, pb, w.pts); w.hit.setAttribute('d', d); w.under.setAttribute('d', d); w.path.setAttribute('d', d);
-    if (this.selected?.kind === 'wire' && this.selected.id === w.id) this._drawHandles(w);
+    if (this.selected?.kind === 'wire' && this.selected.id === w.id && !this._wdrag) this._drawHandles(w);
   }
   _redrawWires() { for (const w of this.wires) this._drawWire(w); this._drawTies(); }
 
@@ -483,26 +488,92 @@ export class CircuitCanvas {
   }
   _handleDown(e, w, kind, idx) {
     e.stopPropagation(); e.preventDefault();
-    const el = e.currentTarget; el.setPointerCapture(e.pointerId);
     if (!w.pts.length) w.pts = this.wirePoints(w).map((q) => ({ x: q.x, y: q.y }));   // the automatic route becomes editable bends
     const now = performance.now();
     if (kind === 'pt' && this._lastTap && this._lastTap.w === w.id && this._lastTap.i === idx && now - this._lastTap.t < 350) {   // double-tap: remove the bend
       w.pts.splice(idx, 1); this._lastTap = null; this._drawWire(w); this._drawHandles(w); this.emit('change', { structural: false }); return;
     }
     this._lastTap = { w: w.id, i: idx, t: now };
-    let i = idx, inserted = false, moved = false; const sx = e.clientX, sy = e.clientY;
+    // a + handle sits in the middle of segment idx (pin→bend counts as segment 0): dragging it moves that run
+    this._dragWire(e, w, kind === 'pt' ? 'pt' : 'seg', idx);
+  }
+  /** index of the straight run of wire w (pin, bends…, pin) nearest to world point p */
+  _nearestSeg(w, p) {
+    const pa = this.pinPos(w.a), pb = this.pinPos(w.b); if (!pa || !pb) return 0;
+    const full = [pa, ...this.wirePoints(w), pb]; let best = 0, bd = Infinity;
+    for (let i = 0; i < full.length - 1; i++) {
+      const a = full[i], b = full[i + 1], dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)), d = Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+  /**
+   * Drag a wire so it follows the finger / mouse 1:1 and keeps its right angles.
+   *  'seg' i : the straight run between corner i and i+1 of [pin, bends…, pin] slides sideways (a run that starts or
+   *            ends at a pin gets a new corner there, so the pin end stays put and a short jog appears)
+   *  'pt'  i : bend i moves freely; its neighbouring bends follow so both adjoining runs stay horizontal / vertical
+   * Snaps to the 5 px grid only when released; listens on the window so the pointer is never lost.
+   */
+  _dragWire(e, w, kind, idx) {
+    if (w.plug) return;
+    const pa = this.pinPos(w.a), pb = this.pinPos(w.b); if (!pa || !pb) return;
+    const id = e.pointerId, sx = e.clientX, sy = e.clientY, start = this.toWorld(sx, sy);
+    const before = JSON.stringify(w.pts);
+    let moved = false, pts = null, plan = null;
+    const setup = () => {
+      pts = (w.pts.length ? w.pts : this.wirePoints(w)).map((q) => ({ x: q.x, y: q.y }));
+      const horiz = (a, b) => Math.abs(b.y - a.y) <= Math.abs(b.x - a.x);
+      if (kind === 'seg') {
+        let i = idx;                                                       // full index of the run start
+        const full = () => [pa, ...pts, pb];
+        if (i === 0) { pts.unshift({ x: pa.x, y: pa.y }); i = 1; }          // run leaves the pin: new corner at the pin
+        if (i + 1 === full().length - 1) pts.push({ x: pb.x, y: pb.y });     // run ends at the pin
+        const f = full(), a = f[i], b = f[i + 1];
+        plan = { k: i - 1, h: horiz(a, b), x0: a.x, y0: a.y };            // pts[k], pts[k+1] are the run's ends
+      } else {
+        const i = idx, c = pts[i]; if (!c) return false;
+        let prev = i > 0 ? pts[i - 1] : pa, next = i < pts.length - 1 ? pts[i + 1] : pb;
+        const ph = horiz(prev, c), nh = horiz(c, next);
+        let ci = i;
+        if (i === 0) { pts.unshift({ x: pa.x, y: pa.y }); ci = 1; }         // keep the pin end square: corner at the pin
+        if (ci === pts.length - 1) pts.push({ x: pb.x, y: pb.y });
+        plan = { ci, ph, nh, x0: c.x, y0: c.y };
+      }
+      return true;
+    };
+    const apply = (dx, dy, snap) => {
+      const r = (v) => (snap ? Math.round(v / this.snap) * this.snap : Math.round(v * 2) / 2);
+      if (kind === 'seg') {
+        const { k, h } = plan, A = pts[k], B = pts[k + 1];
+        if (h) { const y = r(plan.y0 + dy); A.y = y; B.y = y; } else { const x = r(plan.x0 + dx); A.x = x; B.x = x; }
+      } else {
+        const { ci, ph, nh } = plan, c = pts[ci], x = r(plan.x0 + dx), y = r(plan.y0 + dy);
+        c.x = x; c.y = y;
+        const P = pts[ci - 1], N = pts[ci + 1];
+        if (P) { if (ph) P.y = y; else P.x = x; }
+        if (N) { if (nh) N.y = y; else N.x = x; }
+      }
+      w.pts = simplify([pa, ...pts.map((q) => ({ ...q })), pb]).slice(1, -1);
+      if (!w.pts.length) w.pts = pts.map((q) => ({ ...q }));
+      w.bundle = 0; this._drawWire(w);
+    };
     const move = (ev) => {
-      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
-      moved = true;
-      const p = this.toWorld(ev.clientX, ev.clientY), q = { x: Math.round(p.x / this.snap) * this.snap, y: Math.round(p.y / this.snap) * this.snap };
-      if (kind === 'mid' && !inserted) { w.pts.splice(i, 0, q); inserted = true; } else w.pts[i] = q;
-      this._drawWire(w);
+      if (ev.pointerId !== id) return;
+      if (!moved) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return; if (!setup()) return; moved = true; this._wdrag = true; this.handlesSvg.replaceChildren(); this.viewport.classList.add('wire-dragging'); }
+      ev.preventDefault();
+      const p = this.toWorld(ev.clientX, ev.clientY); apply(p.x - start.x, p.y - start.y, false);
     };
-    const up = () => {
-      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up);
-      if (moved) { this._lastTap = null; this._drawHandles(w); this._drawTies(); this.emit('change', { structural: false }); }
+    const up = (ev) => {
+      if (ev.pointerId !== id) return;
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+      if (!moved) return;
+      const p = this.toWorld(ev.clientX, ev.clientY); apply(p.x - start.x, p.y - start.y, true);
+      this._wdrag = false; this._lastTap = null; this.viewport.classList.remove('wire-dragging');
+      this._drawHandles(w); this._drawTies();
+      if (JSON.stringify(w.pts) !== before) this.emit('change', { structural: false });
     };
-    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+    window.addEventListener('pointermove', move, { passive: false }); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
   }
   /** orthogonal route: leave each pin straight out, then horizontal / vertical runs (grid-aligned) */
   _tidyPts(w) {

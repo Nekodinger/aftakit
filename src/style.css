@@ -737,3 +737,8 @@ body.mode-pcb #toolbar .tb-group:not(.run-group):not(.v3-keep) { display: none; 
 .saved-empty { padding: 18px; text-align: center; }
 /* phones: the language switch lives in the display-mode menu, so the File/Edit/Help menus keep their room */
 :root:is([data-device="phone"], [data-w="xs"]) #btnLang { display: none; }
+
+#emptyHint .eh-phone { display: none; }
+:root[data-device="phone"] #emptyHint .eh-phone { display: inline; }
+:root[data-device="phone"] #emptyHint .eh-wide { display: none; }
+.viewport.wire-dragging, .viewport.wire-dragging * { cursor: grabbing !important; }
