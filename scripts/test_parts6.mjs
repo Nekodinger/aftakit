@@ -97,4 +97,27 @@ void loop(){}`);
   ok(seen.length === 1 && seen[0][0] === 'GET' && seen[0][1] === 'http://api.thingspeak.com/update?api_key=ABC&field1=27', `HTTP request made: ${JSON.stringify(seen)}`);
   ok(/\+IPD,\d+:HTTP\/1\.1 200 OK[\s\S]*0 ?CLOSED/.test(t), `response delivered as +IPD then CLOSED: ${t.slice(-160)}`);
 }
+// 8. NEO-M8N: multi-GNSS NMEA ($GNRMC/$GNGGA + GPGSV/GLGSV), parsed by TinyGPS++; satellites from all constellations
+{
+  const { sim } = make([['g', 'mod-gps-m8n', GPS, {}, { lat: '-6.3612', lng: '106.7286', alt: '45', speed: '20', sats: '18', gnss: 'GPS + GLONASS' }]],
+    [['g:TX', 'uno:2'], ['g:RX', 'uno:3'], ['g:VCC', 'uno:5V'], ['g:GND', 'uno:GND.1']],
+    `#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
+TinyGPSPlus gps; SoftwareSerial ss(2, 3);
+void setup(){ Serial.begin(115200); ss.begin(9600); }
+void loop(){ while (ss.available()) gps.encode(ss.read());
+  static unsigned long t = 0; if (millis() - t > 1000 && gps.location.isUpdated()) { t = millis();
+    Serial.print(gps.location.lat(), 4); Serial.print(" "); Serial.print(gps.location.lng(), 4); Serial.print(" "); Serial.print(gps.altitude.meters(), 1);
+    Serial.print(" "); Serial.print(gps.speed.kmph(), 1); Serial.print(" "); Serial.print(gps.satellites.value()); Serial.print(" "); Serial.println(gps.failedChecksum()); } }`);
+  sim.advance(3500);
+  const l = lines(sim).at(-1)?.split(' ') || [];
+  ok(l[0] === '-6.3612' && l[1] === '106.7286' && l[2] === '45.0' && Math.abs(+l[3] - 20) < 0.1 && l[4] === '18' && l[5] === '0', `NEO-M8N via TinyGPS++: ${lines(sim).at(-1)}`);
+}
+{
+  const { sim } = make([['g', 'mod-gps-m8n', GPS, {}, { gnss: 'GPS + Galileo + BeiDou', sats: '20' }]], [['g:TX', 'uno:0'], ['g:VCC', 'uno:5V'], ['g:GND', 'uno:GND.1']],
+    `void setup(){ Serial.begin(9600); } void loop(){ static String s; while (Serial.available()) { char c = Serial.read(); if (c == '\\n') { if (s.length() > 6) { Serial.print(s.substring(1, 6)); Serial.print(' '); } s = ""; } else if (s.length() < 90) s += c; } }`);
+  sim.advance(2600);
+  const out = sim.serialText || lines(sim).join(' ');
+  ok(/GNRMC/.test(out) && /GNGGA/.test(out) && /GPGSV/.test(out) && /GAGSV/.test(out) && /GBGSV/.test(out) && !/GPRMC/.test(out), `NEO-M8N GPS+Galileo+BeiDou talkers: ${[...new Set(out.match(/G[A-Z]{4}/g) || [])].join(',')}`);
+}
 done();

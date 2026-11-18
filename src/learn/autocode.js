@@ -43,7 +43,7 @@ export function readCircuit(canvas, catalog) {
  */
 export function generateSketch(circ) {
   const board = boardKind(circ.cat), esp = /esp32/.test(board), adcMax = esp ? 4095 : /esp8266|rp2040/.test(board) ? 1023 : 1023;
-  const inc = [], glob = [], setup = [], loop = [], parts = [], unknown = [];
+  const inc = [], glob = [], setup = [], loop = [], idle = [], parts = [], unknown = [];
   const addU = (arr, xs) => { for (const x of xs || []) if (!arr.includes(x)) arr.push(x); };
   // I²C on non-default ESP32 pins
   const i2c = circ.items.find((it) => it.pins.SDA != null && it.pins.SCL != null && it.type !== 'wokwi-dht22');
@@ -55,7 +55,7 @@ export function generateSketch(circ) {
     addU(inc, piece.inc);
     glob.push(`// ${it.name} (${it.id})`, ...piece.glob);
     setup.push(...(piece.setup || []).map((l) => l));
-    loop.push(`// ${it.id}`, ...piece.loop);
+    loop.push(`// ${it.id}`, ...piece.loop); addU(idle, piece.idle);
     parts.push({ id: it.id, name: it.name, piece });
   }
   if (i2c && esp && (i2c.pins.SDA !== '21' || i2c.pins.SCL !== '22')) { addU(inc, ['#include <Wire.h>']); setup.unshift(`Wire.begin(${i2c.pins.SDA}, ${i2c.pins.SCL});   // I2C di pin SDA/SCL yang dipakai`); }
@@ -76,7 +76,10 @@ ${setup.map((l) => '  ' + l).join('\n')}
 void loop() {
 ${loop.map((l) => (l.startsWith('//') ? '\n  ' + l : '  ' + l)).join('\n')}
 
-  delay(${slow ? 2000 : 300});${slow ? '   // DHT dibaca paling cepat tiap 2 detik' : ''}
+${idle.length ? `  // jeda ${slow ? 2000 : 300} ms sambil tetap membaca data serial (delay() biasa membuat buffer serial meluap)
+  for (unsigned long t0 = millis(); millis() - t0 < ${slow ? 2000 : 300};) {
+${idle.map((l) => '    ' + l).join('\n')}
+  }` : `  delay(${slow ? 2000 : 300});${slow ? '   // DHT dibaca paling cepat tiap 2 detik' : ''}`}
 }
 `.replace(/\n{3,}/g, '\n\n');
   return { code, parts, unknown };

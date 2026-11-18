@@ -145,6 +145,26 @@ export const TEMPLATES = [
   [/^mod-vibration$/, digitalSensor('Getaran', 'DO', false, TEST_TOGGLE)],
   [/^mod-touch$/, digitalSensor('Sentuhan', 'SIG', false, TEST_TOGGLE)],
   [/^wokwi-tilt-switch$/, digitalSensor('Miring', 'OUT', false, TEST_TOGGLE)],
+  [/^mod-gps(-m8n)?$/, (c) => {
+    if (!need(c, 'TX')) return null;                     // module TX -> microcontroller RX is the line that matters
+    const m8 = c.type === 'mod-gps-m8n', v = vn(c.id), baud = +(c.attrs?.baud || 9600), rx = c.pins.TX, tx = c.pins.RX ?? -1;
+    const esp = /esp32/.test(c.board), mega = /mega/.test(c.board), rp = /rp2040|pico/.test(c.board);
+    const hw = esp ? 'Serial2' : mega && ['19', '17', '15'].includes(rx) ? { 19: 'Serial1', 17: 'Serial2', 15: 'Serial3' }[rx] : rp && rx === '1' ? 'Serial1' : null;
+    const port = hw || `${v}Serial`;
+    return {
+      inc: ['#include <TinyGPS++.h>', ...(hw ? [] : ['#include <SoftwareSerial.h>'])],
+      glob: [pinConst(c, 'RX', rx), pinConst(c, 'TX', tx), `TinyGPSPlus ${v}Gps;`, ...(hw ? [] : [`SoftwareSerial ${port}(${P(c, 'RX')}, ${P(c, 'TX')});   // RX mikrokontroler <- TX GPS`])],
+      setup: [esp ? `${port}.begin(${baud}, SERIAL_8N1, ${P(c, 'RX')}, ${P(c, 'TX')});   // TX GPS -> GPIO${rx}` : hw && rp ? `${port}.begin(${baud});   // Serial1 Pico: RX = GP1, TX = GP0` : `${port}.begin(${baud});`],
+      idle: [`while (${port}.available()) ${v}Gps.encode(${port}.read());   // NMEA dibaca terus, juga selama jeda`],
+      loop: [`if (${v}Gps.location.isValid()) {`,
+        `  Serial.print("${c.id} lat: "); Serial.print(${v}Gps.location.lat(), 6); Serial.print("  lng: "); Serial.print(${v}Gps.location.lng(), 6);`,
+        `  Serial.print("  alt: "); Serial.print(${v}Gps.altitude.meters()); Serial.print(" m  satelit: "); Serial.print(${v}Gps.satellites.value());`,
+        `  Serial.print("  kecepatan: "); Serial.print(${v}Gps.speed.kmph()); Serial.println(" km/j");`,
+        `} else if (millis() > 5000 && ${v}Gps.charsProcessed() < 10) Serial.println("${c.id}: tidak ada data NMEA, cek kabel TX GPS -> RX dan baud ${baud}");`,
+        `else Serial.println("${c.id}: menunggu fix satelit...");`],
+      explain: `${m8 ? 'NEO-M8N mengirim kalimat NMEA ($GNRMC, $GNGGA, gabungan GPS + GLONASS/Galileo/BeiDou)' : 'NEO-6M mengirim kalimat NMEA ($GPRMC, $GPGGA)'} lewat UART ${baud} baud. TinyGPS++ menguraikannya: encode() tiap byte, lalu location.lat()/lng(), altitude, satellites, speed. ${hw ? `${port} memakai UART hardware.` : 'SoftwareSerial membuat port serial di pin digital biasa.'}`,
+      test: 'Jalankan simulasi: dalam ±1 detik muncul lintang/bujur. Ubah lintang, bujur, kecepatan atau fix di panel Properti dan lihat Serial Monitor ikut berubah.' };
+  }],
   [/^mod-mosfet$/, (c) => need(c, 'SIG') && {
     glob: [pinConst(c, 'SIG', c.pins.SIG)], setup: [`pinMode(${P(c, 'SIG')}, OUTPUT);`],
     loop: [`analogWrite(${P(c, 'SIG')}, (millis() / 20) % 256);   // kecepatan beban naik 0 → 255 lalu ulang`],

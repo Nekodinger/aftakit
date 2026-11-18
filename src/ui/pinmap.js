@@ -172,7 +172,12 @@ export function planComp(canvas, catalog, mcu, comp, usedMcu) {
     else if (r.role === 'power') m = power(r.v);
     else if (r.role === 'i2c') m = bus('I2C ' + r.sig);
     else if (r.role === 'spi') m = r.sig === 'SS' ? (bus('SPI SS', false) || digital()) : bus('SPI ' + r.sig);
-    else if (r.role === 'uart') m = r.sig === 'TX' ? (esp ? 'RX2' : avr ? '2' : bus('UART RX')) : (esp ? 'TX2' : avr ? '3' : bus('UART TX'));
+    else if (r.role === 'uart') {
+      // module TX -> MCU RX. ESP32: Serial2 (16/17); Mega: Serial1 (19/18); Pico: Serial1 (GP1/GP0); ESP8266: SoftwareSerial D5/D6 (RNT); Uno/Nano: SoftwareSerial 2/3
+      const b = cat?.board || '', mega = /mega/.test(b), k8266 = /esp8266/.test(b), rp = /rp2040/.test(b) && has('GP1');
+      const pref = r.sig === 'TX' ? (esp ? 'RX2' : mega ? '19' : rp ? 'GP1' : k8266 ? 'D5' : avr ? '2' : null) : (esp ? 'TX2' : mega ? '18' : rp ? 'GP0' : k8266 ? 'D6' : avr ? '3' : null);
+      m = pref && has(pref) && !usedMcu.has(pref) ? pref : bus(r.sig === 'TX' ? 'UART RX' : 'UART TX') || digital();
+    }
     else if (r.role === 'analog') m = analog();
     else m = digital(r.pwm);
     if (!m || !has(m)) continue;

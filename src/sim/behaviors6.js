@@ -20,7 +20,12 @@ function lineReader(onLine, { echo } = {}) {
 }
 
 // ------------------------------------------------------------------ GPS NEO-6M: RMC + GGA + GSA + GSV once per second
-const gps = (ctx) => {
+// NEO-6M: GPS only, talker GP. NEO-M8N (u-blox M8, 72 channels): concurrent GNSS, talker GN for the combined
+// solution plus one GSV group per constellation (GP / GL / GA / GB), as the module sends by default at 9600 baud, 1 Hz.
+const GNSS = { 'GPS + GLONASS': [['GP', [2, 5, 7, 9, 13, 15, 20, 24, 28, 30, 31, 32]], ['GL', [65, 66, 72, 73, 74, 80, 81, 82, 87, 88]]],
+  'GPS + Galileo + BeiDou': [['GP', [2, 5, 7, 9, 13, 15, 20, 24, 28, 30]], ['GA', [3, 8, 13, 15, 21, 26, 27]], ['GB', [6, 9, 16, 19, 22, 29, 36]]],
+  'GPS saja': [['GP', [2, 5, 7, 9, 13, 15, 20, 24, 28, 30, 31, 32]]] };
+const gps = (ctx, m8 = false) => {
   let link = null, pw = 0, t0 = 0, timer = 0, gen = 0;
   const pad = (n, w) => String(Math.floor(n)).padStart(w, '0');
   const deg = (x, w) => { const a = Math.abs(x), d = Math.floor(a), m = (a - d) * 60; return pad(d, w) + m.toFixed(5).padStart(8, '0'); };
@@ -31,22 +36,35 @@ const gps = (ctx) => {
     const fix = attr(ctx, 'fix', 'ya') !== 'tidak';
     const lat = +attr(ctx, 'lat', -6.2), lng = +attr(ctx, 'lng', 106.816666), alt = +attr(ctx, 'alt', 8), kmh = +attr(ctx, 'speed', 0), sats = fix ? +attr(ctx, 'sats', 8) : 0;
     const la = deg(lat, 2), ns = lat < 0 ? 'S' : 'N', lo = deg(lng, 3), ew = lng < 0 ? 'W' : 'E', kn = (kmh / 1.852).toFixed(3);
-    if (!fix) return [nmea(`GPRMC,${hh},V,,,,,,,${date},,,N`), nmea(`GPGGA,${hh},,,,,0,00,99.99,,,,,,`), nmea('GPGSA,A,1,,,,,,,,,,,,,99.99,99.99,99.99'), nmea('GPGSV,1,1,00')];
-    const ids = [2, 5, 7, 9, 13, 15, 20, 24, 28, 30, 31, 32].slice(0, Math.max(0, Math.min(12, sats)));
+    const systems = m8 ? GNSS[attr(ctx, 'gnss', 'GPS + GLONASS')] || GNSS['GPS + GLONASS'] : GNSS['GPS saja'];
+    const T = m8 && systems.length > 1 ? 'GN' : 'GP';
+    if (!fix) return [nmea(`${T}RMC,${hh},V,,,,,,,${date},,,N`), nmea(`${T}GGA,${hh},,,,,0,00,99.99,,,,,,`), nmea(`${T}GSA,A,1,,,,,,,,,,,,,99.99,99.99,99.99`), ...systems.map(([t]) => nmea(`${t}GSV,1,1,00`))];
+    // share the satellites in view between the constellations (GPS gets the larger part)
+    const total = Math.max(0, Math.min(m8 ? 24 : 12, sats)), groups = [];
+    let left = total;
+    systems.forEach(([t, all], k) => { const n = k === systems.length - 1 ? left : Math.min(all.length, Math.round(total * (k === 0 ? (systems.length === 3 ? 0.45 : 0.6) : 0.3))); const ids = all.slice(0, Math.min(all.length, n)); left -= ids.length; groups.push([t, ids]); });
     const gsv = [];
-    for (let i = 0; i < ids.length; i += 4) gsv.push(nmea(`GPGSV,${Math.ceil(ids.length / 4)},${i / 4 + 1},${pad(ids.length, 2)},` + ids.slice(i, i + 4).map((id, k) => `${pad(id, 2)},${pad(20 + ((id * 7) % 60), 2)},${pad((id * 37) % 360, 3)},${30 + ((id + k) % 15)}`).join(',')));
+    for (const [t, ids] of groups) {
+      if (!ids.length) { gsv.push(nmea(`${t}GSV,1,1,00`)); continue; }
+      for (let i = 0; i < ids.length; i += 4) gsv.push(nmea(`${t}GSV,${Math.ceil(ids.length / 4)},${i / 4 + 1},${pad(ids.length, 2)},` + ids.slice(i, i + 4).map((id, k) => `${pad(id, 2)},${pad(20 + ((id * 7) % 60), 2)},${pad((id * 37) % 360, 3)},${30 + ((id + k) % 15)}`).join(',')));
+    }
+    const used = groups.reduce((a, [, ids]) => a + ids.length, 0), hdop = m8 ? (used >= 12 ? '0.62' : '0.85') : '0.92';
+    const crs = (+attr(ctx, 'course', 0)).toFixed(2);
     return [
-      nmea(`GPRMC,${hh},A,${la},${ns},${lo},${ew},${kn},${(+attr(ctx, 'course', 0)).toFixed(2)},${date},,,A`),
-      nmea(`GPVTG,${(+attr(ctx, 'course', 0)).toFixed(2)},T,,M,${kn},N,${kmh.toFixed(3)},K,A`),
-      nmea(`GPGGA,${hh},${la},${ns},${lo},${ew},1,${pad(sats, 2)},0.92,${alt.toFixed(1)},M,4.0,M,,`),
-      nmea(`GPGSA,A,3,${ids.map((i) => pad(i, 2)).concat(Array(12 - ids.length).fill('')).join(',')},1.65,0.92,1.37`),
+      nmea(`${T}RMC,${hh},A,${la},${ns},${lo},${ew},${kn},${crs},${date},,,A`),
+      nmea(`${T}VTG,${crs},T,,M,${kn},N,${kmh.toFixed(3)},K,A`),
+      nmea(`${T}GGA,${hh},${la},${ns},${lo},${ew},1,${pad(used, 2)},${hdop},${alt.toFixed(1)},M,4.0,M,,`),
+      ...groups.map(([, ids]) => nmea(`${T}GSA,A,3,${ids.slice(0, 12).map((i) => pad(i, 2)).concat(Array(Math.max(0, 12 - ids.length)).fill('')).join(',')},1.10,${hdop},0.80`)),
       ...gsv,
-      nmea(`GPGLL,${la},${ns},${lo},${ew},${hh},A,A`),
+      nmea(`${T}GLL,${la},${ns},${lo},${ew},${hh},A,A`),
     ];
   };
   const tick = (my) => {
     if (my !== gen) return;
-    if (pw >= 2.7) link.send(sentences().join(''));
+    if (pw >= 2.7) {
+      link.send(sentences().join(''));
+      if (m8 && attr(ctx, 'fix', 'ya') !== 'tidak') { ctx.el.setLed?.('pps', true); ctx.sim.after(16e6 * 0.1, () => ctx.el.setLed?.('pps', false)); }
+    }
     ctx.sim.after(16e6, () => tick(my));
   };
   return {
@@ -332,7 +350,8 @@ const esp01 = (ctx) => {
 };
 
 export const BEHAVIORS6 = {
-  'mod-gps': gps,
+  'mod-gps': (ctx) => gps(ctx, false),
+  'mod-gps-m8n': (ctx) => gps(ctx, true),
   'mod-hc05': hc05,
   'mod-ftdi': ftdi,
   'mod-sim800l': sim800,

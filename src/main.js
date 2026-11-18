@@ -689,6 +689,7 @@ const HINTS = {
   'mod-nrf24': 'Library RF24: RF24 radio(CE, CSN). VCC 3,3 V! Paket terlihat di log. Pilih "gema" untuk uji kirim-terima dengan satu board, atau pasang dua modul.',
   'mod-lora': 'LoRa (Sandeep Mistry): LoRa.setPins(NSS, RST, DIO0); LoRa.begin(433E6). Waktu kirim sesuai time-on-air sebenarnya (SF, BW).',
   'mod-gps': 'TinyGPS++ dengan SoftwareSerial(RX, TX) 9600 baud. TX GPS → pin RX Arduino. Atur posisi di properti.',
+  'mod-gps-m8n': 'u-blox NEO-M8N: GPS + GLONASS/Galileo/BeiDou sekaligus, 9600 baud, kalimat $GNRMC/$GNGGA (TinyGPS++ 1.x membacanya). VCC 3,3–5 V (ada regulator di modul). TX GPS → RX mikrokontroler: ESP32 Serial2 (GPIO16), Mega Serial1 (pin 19), Uno SoftwareSerial. Fix pertama di luar ruangan ±30 detik; LED biru berkedip tiap detik saat fix.',
   'mod-motor-tt': 'Motor kuning 3–6 V dengan gearbox 1:48 (±200 rpm di 6 V). Kendalikan lewat L298N/MOSFET, jangan langsung dari pin.',
   'mod-motor-130': 'Motor DC kecil 3–6 V (±10.000 rpm tanpa beban). Butuh driver: MOSFET, transistor, atau L298N.',
   'mod-motor-coreless': 'Motor coreless 8520 untuk drone mini (1S 3,7 V, ±34 g gaya dorong dengan baling 65 mm). Kendalikan dengan MOSFET logic-level + PWM.',

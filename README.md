@@ -16,6 +16,7 @@ breadboard, pemeriksaan rangkaian, ramah layar sentuh. Semua komponen di katalog
 - Mode tampilan Laptop / iPad / HP (otomatis atau dipilih), termasuk pratinjau berbingkai — `src/ui/device.js`.
 - Saran komponen tambahan setelah Auto wiring (popup, hanya ditambahkan bila disetujui): resistor 220 Ω LED, pembagi 1 kΩ + 2 kΩ untuk sinyal 5 V ke GPIO 3,3 V, pull-up DS18B20 4,7 kΩ / DHT22 10 kΩ, resistor 330 Ω + kapasitor 1000 µF NeoPixel, NPN + 1 kΩ + 1N4007 untuk relay, modul MOSFET untuk motor/pompa — `src/learn/extras.js`. Pemecah rangkaian menghitung pembagi resistor secara nodal (`src/sim/circuit.js`).
 - Bahasa antarmuka Indonesia / English (tombol ID/EN atau menu mode tampilan). Kode program tidak diterjemahkan — `src/i18n.js`, kamus `src/i18n-en.js` (kunci = teks Indonesia, termasuk potongan pesan bertemplat).
+- GPS u-blox NEO-M8N (`mod-gps-m8n`): NMEA multi-GNSS ($GNRMC/$GNGGA, GSV per konstelasi GPS/GLONASS/Galileo/BeiDou), LED fix berkedip 1 Hz; Auto wiring memakai Serial2 (ESP32), Serial1 (Mega/Pico), SoftwareSerial (Uno/Nano, ESP8266 D5/D6), Auto kode TinyGPS++ untuk NEO-6M dan NEO-M8N.
 - Tombol Simpan (Ctrl+S): proyek disimpan di perangkat (localStorage), daftar di Berkas → Proyek tersimpan; titik oranye menandai perubahan yang belum disimpan.
 
 ## Komponen protokol (dimodelkan sampai level register / pin, diuji dengan library asli)
