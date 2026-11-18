@@ -33,6 +33,7 @@
     <symbol id="i-lib" viewBox="0 0 24 24"><path d="M5 4h3v16H5zM10 4h3v16h-3zM15.2 4.6l2.9-.8 4 15.5-2.9.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-cam" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
     <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 3v5h7V3M8 21v-6h8v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
     <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="19" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6" stroke="currentColor" stroke-width="2"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
@@ -238,6 +239,7 @@
         </section>
 
         <section id="console">
+          <div id="consoleGrip" role="separator" aria-orientation="horizontal" aria-label="Seret untuk mengubah tinggi panel bawah" title="Seret untuk mengubah tinggi panel (ketuk dua kali: ukuran awal)"><i></i></div>
           <div class="pane-head tabs">
             <button class="tab on" data-tab="log">Log <span class="badge" id="logBadge" hidden>0</span></button>
             <button class="tab" data-tab="serial">Serial Monitor <span class="badge dot" id="serialBadge" hidden></span></button>
@@ -322,6 +324,12 @@
           </div>
         </section>
       </section>
+      <!-- ESP32-CAM camera as a floating window, so the Serial Monitor stays visible next to it -->
+      <div id="camFloat" class="float-win" hidden role="dialog" aria-label="Kamera ESP32-CAM">
+        <div class="fw-head" id="camFloatHead"><svg><use href="#i-cam"/></svg><b>Kamera ESP32-CAM</b><span class="muted small">seret untuk memindah</span><button type="button" class="fw-x" id="camFloatClose" title="Tutup"><svg><use href="#i-close"/></svg></button></div>
+        <div class="fw-body" id="camFloatBody"></div>
+        <div class="fw-resize" id="camFloatResize" title="Seret untuk mengubah ukuran"></div>
+      </div>
     </main>
   </div>
 

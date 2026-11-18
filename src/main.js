@@ -134,17 +134,74 @@ function hintFor(msg) {
 // ------------------------------------------------------------------ console tabs + serial
 let consoleTab = 'log', droneView = null;
 function showConsole(name) {
+  if (name === 'cam') { openCamFloat(); return; }
   consoleTab = name;
   $$('[data-tab]').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
   $('#logList').hidden = name !== 'log'; $('#serialPane').hidden = name !== 'serial';
-  $('#btPane').hidden = name !== 'bt'; $('#camPane').hidden = name !== 'cam'; $('#ftdiPane').hidden = name !== 'ftdi';
-  $('#dronePane').hidden = name !== 'drone'; $('#nowPane').hidden = name !== 'now'; $('#console').classList.toggle('tall', name === 'drone'); $('#console').classList.toggle('mid', name === 'now'); droneView?.show(name === 'drone');
+  $('#btPane').hidden = name !== 'bt'; $('#ftdiPane').hidden = name !== 'ftdi';
+  $('#console').classList.toggle('mid', name === 'now'); $('#dronePane').hidden = name !== 'drone'; $('#nowPane').hidden = name !== 'now'; $('#console').classList.toggle('tall', name === 'drone'); droneView?.show(name === 'drone');
   if (name === 'now') $('#nowBadge').hidden = true;
   if (name === 'serial') $('#serialBadge').hidden = true;
   if (name === 'bt') $('#btBadge').hidden = true;
   if (name === 'ftdi') $('#ftdiBadge').hidden = true;
 }
-$$('[data-tab]').forEach((b) => (b.onclick = () => { showConsole(b.dataset.tab); $('#console').classList.remove('collapsed'); }));
+
+// ESP32-CAM camera in a floating window: drag the title bar to move it, the corner to resize it; position and size
+// are remembered. The Kamera tab only opens / closes it, so the console can keep showing the Serial Monitor.
+const camFloat = $('#camFloat');
+$('#camFloatBody').append($('#camPane')); $('#camPane').hidden = false;
+const CF_KEY = 'sim.camFloat';
+function placeCamFloat(r) {
+  const W = innerWidth, H = innerHeight, phone = isPhone();
+  const w = Math.min(W - 16, Math.max(260, r?.w || (phone ? W - 24 : 560))), h = Math.min(H - 16, Math.max(200, r?.h || (phone ? 300 : 360)));
+  const x = Math.min(W - w - 4, Math.max(4, r?.x ?? (W - w - 24))), y = Math.min(H - 48, Math.max(4, r?.y ?? (phone ? 64 : 120)));   // title bar always on screen
+  Object.assign(camFloat.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
+}
+function saveCamFloat() { const b = camFloat.getBoundingClientRect(); try { localStorage.setItem(CF_KEY, JSON.stringify({ x: b.left, y: b.top, w: b.width, h: b.height })); } catch { /* ignore */ } }
+function openCamFloat() {
+  let r = null; try { r = JSON.parse(localStorage.getItem(CF_KEY) || 'null'); } catch { r = null; }
+  placeCamFloat(r); camFloat.hidden = false; $('#tabCam').classList.add('float-on');
+}
+function closeCamFloat() { camFloat.hidden = true; $('#tabCam').classList.remove('float-on'); }
+function toggleCamFloat() { if (camFloat.hidden) { state.camUserClosed = false; openCamFloat(); if (consoleTab === 'log' && sim.running) showConsole('serial'); } else closeCamFloat(); }
+$('#camFloatClose').onclick = () => { state.camUserClosed = true; closeCamFloat(); };
+function dragWin(handle, onMove) {
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button, input, label')) return;
+    e.preventDefault(); handle.setPointerCapture(e.pointerId);
+    const b = camFloat.getBoundingClientRect(), s = { x: e.clientX, y: e.clientY, b }; camFloat.classList.add('moving');
+    const mv = (ev) => onMove(ev.clientX - s.x, ev.clientY - s.y, s.b);
+    const up = () => { handle.removeEventListener('pointermove', mv); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up); camFloat.classList.remove('moving'); saveCamFloat(); };
+    handle.addEventListener('pointermove', mv); handle.addEventListener('pointerup', up); handle.addEventListener('pointercancel', up);
+  });
+}
+dragWin($('#camFloatHead'), (dx, dy, b) => placeCamFloat({ x: b.left + dx, y: b.top + dy, w: b.width, h: b.height }));
+dragWin($('#camFloatResize'), (dx, dy, b) => placeCamFloat({ x: b.left, y: b.top, w: b.width + dx, h: b.height + dy }));
+window.addEventListener('resize', () => { if (!camFloat.hidden) { const b = camFloat.getBoundingClientRect(); placeCamFloat({ x: b.left, y: b.top, w: b.width, h: b.height }); } });
+
+// drag the grip on top of the bottom panel to resize it (mouse, finger or pen); the height is remembered per
+// device type (laptop / iPad / phone) and double-tapping the grip returns to the automatic size
+{
+  const con = $('#console'), grip = $('#consoleGrip'), key = () => 'sim.consoleH.' + (document.documentElement.dataset.device || 'laptop');
+  const maxH = () => Math.max(160, ($('#workspace')?.getBoundingClientRect().height || innerHeight) - 90);
+  const apply = (h) => { if (!h) { con.classList.remove('sized'); con.style.removeProperty('--console-h'); } else { con.style.setProperty('--console-h', Math.round(Math.min(maxH(), Math.max(110, h))) + 'px'); con.classList.add('sized'); } window.dispatchEvent(new Event('resize')); };
+  const load = () => { let h = 0; try { h = +localStorage.getItem(key()) || 0; } catch { /* storage blocked */ } apply(h); };
+  load(); onDeviceChange?.(load);
+  let drag = null, lastTap = 0;
+  grip.addEventListener('pointerdown', (e) => {
+    const now = Date.now(); if (now - lastTap < 350) { try { localStorage.removeItem(key()); } catch { /* ignore */ } apply(0); lastTap = 0; return; } lastTap = now;
+    e.preventDefault(); grip.setPointerCapture(e.pointerId);
+    drag = { y: e.clientY, h: con.getBoundingClientRect().height }; grip.classList.add('drag'); document.body.classList.add('console-resizing');
+    con.classList.remove('collapsed');
+  });
+  grip.addEventListener('pointermove', (e) => { if (!drag) return; apply(drag.h + (drag.y - e.clientY)); });
+  const end = () => { if (!drag) return; drag = null; grip.classList.remove('drag'); document.body.classList.remove('console-resizing');
+    const h = parseFloat(con.style.getPropertyValue('--console-h')); if (h) try { localStorage.setItem(key(), String(h)); } catch { /* ignore */ } };
+  grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+  grip.addEventListener('keydown', (e) => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); apply(con.getBoundingClientRect().height + (e.key === 'ArrowUp' ? 30 : -30)); } });
+  grip.tabIndex = 0;
+}
+$$('[data-tab]').forEach((b) => (b.onclick = () => { if (b.dataset.tab === 'cam') { toggleCamFloat(); return; } showConsole(b.dataset.tab); $('#console').classList.remove('collapsed'); }));
 const serialOut = $('#serialOut'); let serialText = '';
 sim.on('serial', (b) => {
   serialText += b === 13 ? '' : String.fromCharCode(b);
@@ -334,6 +391,7 @@ $('#camFile').onchange = async () => {
 };
 sim.on('camera', (f) => {
   $('#tabCam').hidden = false;
+  if (!state.camAutoDone && !state.camUserClosed) { state.camAutoDone = true; if (camFloat.hidden) openCamFloat(); }   // first photo of a run: show the camera window once
   const now = performance.now(); if (now - lastShotT < 150) return; lastShotT = now;
   if (lastShotUrl) URL.revokeObjectURL(lastShotUrl);
   lastShotUrl = f.builtin ? null : URL.createObjectURL(new Blob([f.bytes], { type: 'image/jpeg' }));
@@ -344,6 +402,7 @@ function updateBoardTabs() {
   const b = boardOf(), kind = runtimeOf(b);
   $('#tabBt').hidden = !(kind === 'esp32' && /BluetoothSerial/.test(editor.value));
   $('#tabCam').hidden = !(b?.part.type === 'mod-esp32-cam' || /esp_camera\.h/.test(editor.value));
+  if ($('#tabCam').hidden) closeCamFloat();
   const ftdis = [...canvas.parts.values()].filter((p) => p.type === 'mod-ftdi').map((p) => p.id), sel = $('#ftdiPort');
   $('#tabFtdi').hidden = !ftdis.length;
   const hadDrone = !$('#tabDrone').hidden; $('#tabDrone').hidden = ![...canvas.parts.values()].some((p) => DRONE_TYPES.has(p.type));
@@ -530,7 +589,9 @@ async function run() {
       if (!prog) { addLog('error', 'Belum ada program.'); return; }
       if (!(await buildSim(prog))) return;
       serialText = ''; serialOut.textContent = ''; btReset();
-      sim.start(); addLog('info', 'Simulasi dimulai.');
+      state.camAutoDone = false; sim.start(); addLog('info', 'Simulasi dimulai.');
+      // ESP32-CAM: the camera window opens with the run (unless closed by hand) and the console shows the Serial Monitor
+      if (b?.part.type === 'mod-esp32-cam' && !state.camUserClosed) { state.camAutoDone = true; if (camFloat.hidden) openCamFloat(); if (consoleTab === 'log') showConsole('serial'); }
     } else {
       const res = runCheck(true);
       if (b) addLog('info', `${b.cat.name}: mode desain. Daya, sensor, saklar, relay, dan motor disimulasikan; pin GPIO tidak dikendalikan karena kode ${b.cat.mcu} tidak dapat dijalankan di sini.`);
@@ -1065,7 +1126,7 @@ function openHelp() {
   <h4>Mode tampilan: Laptop, iPad, HP</h4><ul><li>Tombol layar di kanan atas memilih tata letak. <b>Otomatis</b> menyesuaikan perangkat. Di HP, panel ada di bilah bawah dan konsol bisa diperkecil. Memilih mode yang lebih kecil dari layar menampilkan pratinjau berbingkai (berguna bagi guru untuk melihat tampilan siswa di HP).</li><li><b>Bahasa</b>: tombol <b>ID</b>/<b>EN</b> di kanan atas (atau menu mode tampilan) mengganti bahasa antarmuka ke Bahasa Indonesia atau English, termasuk nama komponen, menu, pesan Log, dan panduan. Kode program tidak diterjemahkan. Proyek yang sedang dibuka tetap terbawa.</li></ul>
   <h4>Kanvas</h4><ul><li>Satu jari di area kosong: geser kanvas. Dua jari: cubit untuk zoom.</li><li>Seret komponen untuk memindah. Saat simulasi berjalan, seret lewat label nama di atasnya.</li><li>Tombol putar, duplikat, hapus, urungkan/ulangi ada di toolbar atas.</li><li><b>Simpan</b> (Ctrl+S) di kanan atas menyimpan proyek di perangkat ini; buka lagi lewat Berkas → <b>Proyek tersimpan</b>. Titik oranye di tombol Simpan berarti ada perubahan yang belum disimpan.</li></ul>
   <h4>Simulasi</h4><ul><li>Rangkai di <b>Desain</b>, tulis program di <b>Kode</b> (tombol <b>Auto kode</b> membuatkan program dari rangkaianmu), lalu tekan <b>Jalankan</b>. Simulasi berjalan langsung di kanvas Desain (2D maupun 3D); galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Kode dijalankan untuk Arduino Uno/Nano/Mega, Franzininho (ATtiny85), ESP32 DevKit, ESP32-CAM, NodeMCU / Wemos D1 mini (ESP8266), Raspberry Pi Pico dan Nano RP2040 Connect.</li></ul>
-  <h4>ESP32: WiFi, internet, Bluetooth, kamera</h4><ul><li><b>WiFi</b> tersimulasi: <code>WiFi.begin()</code> tersambung ±1 detik (nama/password bebas, mis. "Wokwi-GUEST"), IP 10.10.0.2.</li><li><b>Internet nyata</b>: <code>HTTPClient</code> (GET/POST, http/https) memakai koneksi iPad/laptop ini; layanan tanpa izin CORS otomatis lewat proxy simulator.</li><li><b>Blynk, Telegram, MQTT, ThingSpeak</b>: <code>WiFiClient</code> / <code>WiFiClientSecure</code> / <code>WiFiUDP</code> tersambung sungguhan lewat <b>gateway IoT</b> server kompilasi (seperti Wokwi), jadi library asli (BlynkSimpleEsp32, UniversalTelegramBot, PubSubClient…) dan API key asli langsung bisa dipakai.</li><li><b>Library</b>: <code>#include</code> library dari Arduino Library Manager diunduh otomatis. Library .zip (mis. Edge Impulse) ditambahkan di panel <b>Library</b>.</li><li><b>Bluetooth</b>: <code>BluetoothSerial</code> tersambung ke tab <b>Bluetooth</b> di konsol (seperti aplikasi Serial Bluetooth Terminal di HP).</li><li><b>ESP32-CAM</b>: <code>esp_camera_fb_get()</code> mengambil foto JPEG dari tab <b>Kamera</b>: kamera iPad/laptop, foto unggahan, atau gambar contoh.</li><li>Seperti ESP32 asli: ADC2 (GPIO 0, 2, 4, 12–15, 25–27) tidak bisa dibaca saat WiFi aktif — pakai GPIO 32–39. GPIO 34–39 hanya input. Logika 3,3 V.</li><li><b>Edge Impulse</b>: unggah ekspor "Arduino library" di panel Library; ESP32-CAM memakai gambar dari tab Kamera (<code>fmt2rgb888</code> didukung).</li><li><b>Contoh program library</b> (seperti Arduino IDE → File → Examples): Berkas → <b>Contoh dari library…</b> atau tab <b>Library</b> di panel Contoh. Isinya contoh bawaan Arduino, contoh semua library simulator, dan contoh di dalam file .zip yang kamu unggah (mis. <code>esp32_camera</code> dari ekspor Edge Impulse). Kode dibuka di tab Kode; rangkaiannya tetap disusun di Desain.</li><li><b>Kompilasi lama</b>: library besar (Edge Impulse) dikompilasi bertahap di server, pertama kali bisa beberapa menit. Waktu berjalan tampil di bilah status; tekan ■ untuk membatalkan. Kompilasi berikutnya cepat karena hasilnya disimpan di server.</li><li>Belum didukung: WebServer / server di dalam ESP32 (gateway hanya koneksi keluar), Bluetooth BLE, FreeRTOS task. Waktu CPU diperkirakan, bukan akurat per siklus.</li></ul>`;
+  <h4>ESP32: WiFi, internet, Bluetooth, kamera</h4><ul><li><b>WiFi</b> tersimulasi: <code>WiFi.begin()</code> tersambung ±1 detik (nama/password bebas, mis. "Wokwi-GUEST"), IP 10.10.0.2.</li><li><b>Internet nyata</b>: <code>HTTPClient</code> (GET/POST, http/https) memakai koneksi iPad/laptop ini; layanan tanpa izin CORS otomatis lewat proxy simulator.</li><li><b>Blynk, Telegram, MQTT, ThingSpeak</b>: <code>WiFiClient</code> / <code>WiFiClientSecure</code> / <code>WiFiUDP</code> tersambung sungguhan lewat <b>gateway IoT</b> server kompilasi (seperti Wokwi), jadi library asli (BlynkSimpleEsp32, UniversalTelegramBot, PubSubClient…) dan API key asli langsung bisa dipakai.</li><li><b>Library</b>: <code>#include</code> library dari Arduino Library Manager diunduh otomatis. Library .zip (mis. Edge Impulse) ditambahkan di panel <b>Library</b>.</li><li><b>Bluetooth</b>: <code>BluetoothSerial</code> tersambung ke tab <b>Bluetooth</b> di konsol (seperti aplikasi Serial Bluetooth Terminal di HP).</li><li><b>ESP32-CAM</b>: <code>esp_camera_fb_get()</code> mengambil foto JPEG dari tab <b>Kamera</b>: kamera iPad/laptop, foto unggahan, atau gambar contoh.</li><li>Seperti ESP32 asli: ADC2 (GPIO 0, 2, 4, 12–15, 25–27) tidak bisa dibaca saat WiFi aktif — pakai GPIO 32–39. GPIO 34–39 hanya input. Logika 3,3 V.</li><li><b>Edge Impulse</b>: unggah ekspor "Arduino library" di panel Library; ESP32-CAM memakai gambar dari tab Kamera (<code>fmt2rgb888</code> didukung).</li><li><b>Contoh program library</b> (seperti Arduino IDE → File → Examples): Berkas → <b>Contoh dari library…</b> atau tab <b>Library</b> di panel Contoh. Isinya contoh bawaan Arduino, contoh semua library simulator, dan contoh di dalam file .zip yang kamu unggah (mis. <code>esp32_camera</code> dari ekspor Edge Impulse). Kode dibuka di tab Kode; rangkaiannya tetap disusun di Desain.</li><li><b>Jendela kamera</b>: saat ESP32-CAM dijalankan, kamera tampil di jendela mengambang sehingga Serial Monitor tetap terlihat. Seret judulnya untuk memindah, seret sudut kanan bawah untuk mengubah ukuran; tab Kamera membuka/menutupnya. Tinggi panel bawah (Log/Serial) bisa diubah dengan menyeret garis di atasnya.</li><li><b>Kompilasi lama</b>: library besar (Edge Impulse) dikompilasi bertahap di server, pertama kali bisa beberapa menit. Waktu berjalan tampil di bilah status; tekan ■ untuk membatalkan. Kompilasi berikutnya cepat karena hasilnya disimpan di server.</li><li>Belum didukung: WebServer / server di dalam ESP32 (gateway hanya koneksi keluar), Bluetooth BLE, FreeRTOS task. Waktu CPU diperkirakan, bukan akurat per siklus.</li></ul>`;
   $('#dlgHelp').showModal();
 }
 function openAbout() {

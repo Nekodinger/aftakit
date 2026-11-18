@@ -352,9 +352,10 @@ dialog label input { width: 100%; margin-top: 4px; background: var(--panel-2); b
 .bt-quick { display: flex; gap: 4px; }
 .cam-src { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .cam-src .seg { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; min-height: 32px; }
-.cam-views { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; overflow: auto; }
-.cam-views figure { margin: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.cam-views img, .cam-views video { width: 100%; max-height: 180px; object-fit: contain; background: #111; border-radius: 6px; }
+.cam-views { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); gap: 8px; padding: 8px; overflow: auto; }
+.cam-views figure { margin: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0; }
+.cam-views img, .cam-views video { flex: 1; width: 100%; height: 100%; min-height: 80px; object-fit: contain; background: #111; border-radius: 6px; }
+.cam-views img[hidden], .cam-views video[hidden] { display: none; }
 .cam-views figcaption { font-size: 11px; color: var(--muted); }
 
 /* ---- Library panel */
@@ -764,3 +765,30 @@ body.mode-pcb #toolbar .tb-group:not(.run-group):not(.v3-keep) { display: none; 
 .libex-items button i { font-style: normal; font-size: 10.5px; color: var(--warn); margin-left: auto; }
 .libex-group { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); font-weight: 700; margin: 6px 2px 0; }
 .lib-ex-link { font-size: 12px; color: var(--accent); background: none; border: 0; padding: 2px 0; cursor: pointer; }
+
+/* bottom panel: drag the grip to set its height (stored per device type); collapsing still wins */
+#console { position: relative; }
+#consoleGrip { position: absolute; left: 0; right: 0; top: -6px; height: 12px; cursor: ns-resize; z-index: 5; touch-action: none; display: flex; align-items: center; justify-content: center; }
+#consoleGrip i { width: 44px; height: 4px; border-radius: 3px; background: var(--line-2, #c9cdd6); opacity: .9; transition: background .15s; }
+#consoleGrip:hover i, #consoleGrip.drag i { background: var(--accent); }
+#console.sized:not(.collapsed) { height: var(--console-h) !important; }
+#console.collapsed #consoleGrip { display: none; }
+body.console-resizing, body.console-resizing * { cursor: ns-resize !important; user-select: none !important; }
+:root[data-device="phone"] #consoleGrip { top: -10px; height: 20px; }
+:root[data-device="phone"] #consoleGrip i { width: 56px; height: 5px; }
+
+/* floating camera window (ESP32-CAM): stays over the canvas while the Serial Monitor is open below */
+.float-win { position: fixed; z-index: 60; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,.25); overflow: hidden; min-width: 260px; min-height: 200px; }
+.float-win[hidden] { display: none; }
+.fw-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; background: var(--panel-2, var(--panel)); border-bottom: 1px solid var(--line); cursor: move; touch-action: none; user-select: none; }
+.fw-head svg { width: 16px; height: 16px; color: var(--accent); flex: none; }
+.fw-head b { font-size: 13px; } .fw-head .muted { margin-right: auto; font-size: 11px; }
+.fw-x { width: 32px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); border-radius: 8px; cursor: pointer; }
+.fw-x:hover { background: var(--accent-soft); color: var(--text); } .fw-x svg { width: 16px; height: 16px; }
+.fw-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fw-body #camPane { flex: 1; }
+.fw-resize { position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; cursor: nwse-resize; touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 56%, transparent 56%, transparent 70%, var(--muted) 70%, var(--muted) 76%, transparent 76%); opacity: .7; }
+.float-win.moving, .float-win.moving * { user-select: none; }
+:root[data-device="phone"] .fw-head .muted { display: none; }
+#tabCam.float-on { color: var(--accent); }
