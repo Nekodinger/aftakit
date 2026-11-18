@@ -57,6 +57,7 @@
                 <button data-act="new">Proyek baru</button>
                 <button data-act="save">Simpan <kbd>Ctrl S</kbd></button>
                 <button data-act="saved">Proyek tersimpan…</button>
+                <button data-act="libex">Contoh dari library…</button>
                 <button data-act="export-json">Unduh proyek (.json)</button>
                 <button data-act="import-json">Buka proyek (.json)…</button>
                 <button data-act="export-ino">Unduh kode (.ino)</button>
@@ -121,7 +122,9 @@
           <div id="partList" class="scroll"></div>
           <div class="lp-foot muted" id="partCount"></div>
         </section>
-        <section class="lp" data-lp="examples" hidden><div class="lp-head"><b>Proyek contoh</b><span class="muted small">Ketuk untuk membuka</span></div><div id="examplesList" class="scroll"></div></section>
+        <section class="lp" data-lp="examples" hidden><div class="lp-head"><b>Contoh</b><div class="seg ex-tabs" id="exTabs" role="tablist"><button type="button" data-ext="proj" class="on" role="tab">Proyek</button><button type="button" data-ext="lib" role="tab">Library</button></div></div>
+          <div id="examplesList" class="scroll"></div>
+          <div id="libExPane" class="scroll" hidden><input id="libExSearch" type="search" placeholder="Cari contoh (mis. dht, servo, blink)…" autocomplete="off"><p class="muted small libex-note">Seperti Arduino IDE → File → Examples. Kode contoh dibuka di tab Kode; rangkaiannya disusun sendiri di Desain (bisa dibantu Auto wiring).</p><div id="libExList"></div></div></section>
         <section class="lp" data-lp="check" hidden>
           <div class="lp-head"><b>Pemeriksaan rangkaian</b><button class="btn" id="btnCheck"><svg><use href="#i-check"/></svg><span>Periksa sekarang</span></button><button class="btn" id="btnExtras" title="Resistor, pembagi tegangan, pull-up, driver yang sebaiknya ditambahkan">Saran komponen tambahan</button></div>
           <div id="checkList" class="scroll"><div class="prop-empty">Tekan "Periksa sekarang" untuk mengecek daya, korsleting, pin 3.3 V/5 V, pin khusus ESP32, I2C, dan lainnya.</div></div>

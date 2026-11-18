@@ -61,20 +61,18 @@ async function ensureLibs(base, libs, getLib, onProgress) {
   }
 }
 // long builds (Edge Impulse, TensorFlow Lite): a self-hosted server returns a job id to poll; the serverless
-// service compiles in slices of ~4 minutes and answers {pending} -> send the same request again to continue
-async function waitJob(base, data, onProgress, again) {
-  const t0 = Date.now();
-  while (data && data.pending && Date.now() - t0 < 20 * 60000) {
-    onProgress?.(`Mengompilasi library besar… ${Math.round((Date.now() - t0) / 1000)} s (pertama kali bisa beberapa menit, berikutnya cepat)`);
-    try {
-      if (data.job) { await new Promise((r) => setTimeout(r, 3000)); data = await (await fetch(`${base}/job/${data.job}`)).json(); }
-      else data = await (await again()).json();
-    } catch { await new Promise((r) => setTimeout(r, 3000)); }
-  }
-  return data;
+// service compiles in slices of ~3 minutes and answers {pending} -> the same request is sent again and compilation
+// continues from the server cache. A slice cut off by the platform (HTTP 502/503/504, dropped connection) is retried
+// the same way, because everything compiled before the cut is cached.
+const sleep = (ms, signal) => new Promise((res, rej) => { const t = setTimeout(res, ms); signal?.addEventListener('abort', () => { clearTimeout(t); rej(new DOMException('aborted', 'AbortError')); }, { once: true }); });
+function withTimeout(signal, ms) {
+  const c = new AbortController(), t = setTimeout(() => c.abort(new DOMException('timeout', 'TimeoutError')), ms);
+  signal?.addEventListener('abort', () => c.abort(signal.reason), { once: true });
+  return { signal: c.signal, done: () => clearTimeout(t) };
 }
+const LIMIT = 25 * 60000;
 
-export async function compile(code, { precompiled, board = 'avr', mcu = 'uno', libs = [], getLib, onProgress } = {}) {
+export async function compile(code, { precompiled, board = 'avr', mcu = 'uno', libs = [], getLib, onProgress, signal } = {}) {
   if (precompiled && precompiled.code === code && precompiled.hex && board === 'avr') {
     return { ok: true, hex: precompiled.hex, stdout: precompiled.info || '', stderr: '', diagnostics: [], source: 'contoh (prakompilasi)' };
   }
@@ -86,30 +84,48 @@ export async function compile(code, { precompiled, board = 'avr', mcu = 'uno', l
   if (cache.has(key)) return { ...cache.get(key), source: 'cache' };
 
   const ep = compileEndpoint(board);
-  if (ep) {
-    let res;
-    const post = () => fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sketch: code, board, mcu, libs: libs.map((l) => l.sha) }), signal: AbortSignal.timeout(320000) });
-    if (libs.length && board !== 'avr') {
-      try { await ensureLibs(compileBase(), libs, getLib, onProgress); } catch (e) { return fail(e.message, 'server'); }
-    }
-    try {
-      res = await post();
-    } catch (e) {
-      const msg = (e.name === 'AbortError' || e.name === 'TimeoutError') ? 'Server kompilator tidak menjawab dalam 5 menit (mungkin sedang bangun dari tidur — coba lagi).' : `Tidak dapat menghubungi server kompilator (${ep}). Periksa koneksi, atau URL di Berkas → Pengaturan.`;
-      return fail(msg, 'network');
-    }
-    let data = null; try { data = await res.json(); } catch { /* not json */ }
-    if (data?.pending) data = await waitJob(compileBase(), data, onProgress, post);
-    if (data?.pending) return fail('Kompilasi terlalu lama (lebih dari 20 menit). Coba lagi nanti.', 'server');
-    if (res.status === 429) return fail('Terlalu banyak permintaan kompilasi. Tunggu sebentar lalu coba lagi.', 'server');
-    if (res.status === 404 && board !== 'avr') return fail(`Server kompilator ini belum mendukung ${BOARD_NAME[board]} (versi lama). Perbarui server dengan folder server/ terbaru.`, 'server');
-    if (!data) return fail(`Server kompilator membalas dengan status ${res.status} tanpa JSON.`, 'server');
-    if (data.wasm) { const r = { ok: true, wasm: b64bytes(data.wasm), stdout: data.stdout || '', stderr: data.stderr || '', diagnostics: parseDiagnostics(data.stderr), source: 'server' }; cache.set(key, r); return r; }
-    if (data.hex) { const r = { ok: true, hex: data.hex, stdout: data.stdout || '', stderr: data.stderr || '', diagnostics: parseDiagnostics(data.stderr), source: 'server' }; cache.set(key, r); return r; }
-    const err = data.stderr || data.error || 'Kompilasi gagal.';
-    return { ok: false, stdout: data.stdout || '', stderr: err, diagnostics: parseDiagnostics(err), source: 'server', error: err };
+  if (!ep) return fail(`Server kompilator belum dikonfigurasi. Contoh bawaan tetap bisa dijalankan tanpa diubah. Untuk kode ${BOARD_NAME[board]} sendiri: atur URL kompilator di Berkas → Pengaturan${board === 'avr' ? ', atau unduh .ino lalu muat file .hex lewat Berkas → Jalankan berkas .hex' : ''}.`, 'noserver');
+  const cancelled = () => fail('Kompilasi dibatalkan.', 'cancel');
+  if (libs.length && board !== 'avr') {
+    try { await ensureLibs(compileBase(), libs, getLib, onProgress); } catch (e) { return signal?.aborted ? cancelled() : fail(e.message, 'server'); }
   }
-  return fail(`Server kompilator belum dikonfigurasi. Contoh bawaan tetap bisa dijalankan tanpa diubah. Untuk kode ${BOARD_NAME[board]} sendiri: atur URL kompilator di Berkas → Pengaturan${board === 'avr' ? ', atau unduh .ino lalu muat file .hex lewat Berkas → Jalankan berkas .hex' : ''}.`, 'noserver');
+  const body = JSON.stringify({ sketch: code, board, mcu, libs: libs.map((l) => l.sha) });
+  const t0 = Date.now(), secs = () => Math.round((Date.now() - t0) / 1000);
+  let data = null, res = null, tries = 0, cut = 0;
+  while (Date.now() - t0 < LIMIT) {
+    if (signal?.aborted) return cancelled();
+    tries++;
+    const to = withTimeout(signal, 320000);
+    try {
+      res = data?.job ? await fetch(`${compileBase()}/job/${data.job}`, { signal: to.signal }) : await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: to.signal });
+      data = null; try { data = await res.json(); } catch { /* not json */ }
+    } catch (e) {
+      to.done();
+      if (signal?.aborted) return cancelled();
+      if (tries === 1 && e.name !== 'TimeoutError') return fail(`Tidak dapat menghubungi server kompilator (${ep}). Periksa koneksi, atau URL di Berkas → Pengaturan.`, 'network');
+      res = null; data = null;   // dropped / timed out: the server keeps what it compiled, ask again
+    }
+    to.done();
+    const cutOff = !res || [502, 503, 504].includes(res.status);
+    if (data?.pending || data?.job || (cutOff && tries > 0)) {
+      if (cutOff) cut++;
+      if (cut > 6) return fail('Server kompilator berkali-kali terputus sebelum selesai. Coba lagi beberapa menit lagi, atau kurangi library yang dipakai.', 'server');
+      onProgress?.(`Mengompilasi${libs.length ? ' library besar' : ''}… ${secs()} s${tries > 1 ? ` (bagian ${tries})` : ''} — pertama kali bisa beberapa menit, berikutnya cepat. Tekan ■ untuk membatalkan.`);
+      if (data?.job) { await sleep(3000, signal).catch(() => {}); continue; }
+      await sleep(cutOff ? 3000 : 300, signal).catch(() => {});
+      continue;
+    }
+    break;
+  }
+  if (signal?.aborted) return cancelled();
+  if (data?.pending || !res) return fail('Kompilasi terlalu lama (lebih dari 25 menit). Coba lagi nanti.', 'server');
+  if (res.status === 429) return fail('Terlalu banyak permintaan kompilasi. Tunggu sebentar lalu coba lagi.', 'server');
+  if (res.status === 404 && board !== 'avr') return fail(`Server kompilator ini belum mendukung ${BOARD_NAME[board]} (versi lama). Perbarui server dengan folder server/ terbaru.`, 'server');
+  if (!data) return fail(`Server kompilator membalas dengan status ${res.status} tanpa JSON.`, 'server');
+  if (data.wasm) { const r = { ok: true, wasm: b64bytes(data.wasm), stdout: data.stdout || '', stderr: data.stderr || '', diagnostics: parseDiagnostics(data.stderr), source: 'server' }; cache.set(key, r); return r; }
+  if (data.hex) { const r = { ok: true, hex: data.hex, stdout: data.stdout || '', stderr: data.stderr || '', diagnostics: parseDiagnostics(data.stderr), source: 'server' }; cache.set(key, r); return r; }
+  const err = data.stderr || data.error || 'Kompilasi gagal.';
+  return { ok: false, stdout: data.stdout || '', stderr: err, diagnostics: parseDiagnostics(err), source: 'server', error: err };
 }
 
 function fail(message, source) { return { ok: false, diagnostics: [], stderr: message, error: message, source }; }

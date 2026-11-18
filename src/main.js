@@ -11,7 +11,7 @@ import { Editor } from './ui/editor.js';
 import { initDroneView } from './ui/droneview.js';
 import { initDevice, setDeviceMode, onDeviceChange, isNarrow, isPhone, effectiveDevice, DEVICE_NAMES } from './ui/device.js';
 import { compile, loadSettings, saveSettings, testServer, compileEndpoint, parseDiagnostics, gatewayUrl, compileBase } from './compile.js';
-import { putZip, getZip, sha256, describeZip } from './libs.js';
+import { putZip, getZip, sha256, describeZip, zipExamples } from './libs.js';
 import { saveProject, loadProject, sharingAvailable } from './store.js';
 import { EXAMPLES, exampleModel, EXAMPLE_GROUPS } from './examples/defs.js';
 import { exampleHexText, hasExampleHex, exampleWasm, hasExampleWasm } from './examples/pack.js';
@@ -359,7 +359,7 @@ function updateBoardTabs() {
 function renderLibs() {
   const host = $('#libList'); if (!host) return;
   host.innerHTML = state.libs.length ? state.libs.map((l, i) => `<div class="lib-item"><div class="grow"><b>${esc(l.name)}</b>${l.edgeImpulse ? '<span class="tag">Edge Impulse</span> ' : ''}
-    <span class="muted small">${(l.size / 1048576).toFixed(1)} MB</span>${l.include ? `<br><code>#include &lt;${esc(l.include)}&gt;</code>` : ''}</div>
+    <span class="muted small">${(l.size / 1048576).toFixed(1)} MB</span>${l.include ? `<br><code>#include &lt;${esc(l.include)}&gt;</code>` : ''}<br><button type="button" class="lib-ex-link" data-libexopen="${l.sha}">Contoh program library ini ›</button></div>
     <button class="mini" data-libdel="${i}" title="Hapus dari proyek">Hapus</button></div>`).join('') : '<p class="muted small">Belum ada library .zip di proyek ini.</p>';
   $('#libBadge').hidden = !state.libs.length; $('#libBadge').textContent = state.libs.length || '';
   const gw = gatewayUrl();
@@ -375,10 +375,11 @@ $('#libFile').onchange = async () => {
     await putZip(sha, new Blob([buf], { type: 'application/zip' }));
     state.libs = [...state.libs.filter((l) => l.sha !== sha), { name: d.name, sha, size: f.size, include: d.include, edgeImpulse: d.edgeImpulse }];
     renderLibs(); addLog('ok', `Library "${d.name}" ditambahkan${d.include ? ` — pakai #include <${d.include}>` : ''}.`);
+    try { const z = await zipExamples(buf); zipEx.set(sha, z); if (z.list.length) addLog('info', `Library "${d.name}" punya ${z.list.length} contoh program: buka lewat Berkas → Contoh dari library, atau tautan di bawah nama library.`); } catch { /* examples are optional */ }
     toast('Library ditambahkan.');
   } catch (e) { toast('Gagal menambah library: ' + e.message, true); }
 };
-$('#libList').onclick = (e) => { const b = e.target.closest('[data-libdel]'); if (!b) return; state.libs.splice(+b.dataset.libdel, 1); renderLibs(); };
+$('#libList').onclick = (e) => { const o = e.target.closest('[data-libexopen]'); if (o) { openLibExPanel('zip:' + o.dataset.libexopen); return; } const b = e.target.closest('[data-libdel]'); if (!b) return; state.libs.splice(+b.dataset.libdel, 1); renderLibs(); };
 renderLibs();
 
 // ------------------------------------------------------------------ modes & panels
@@ -470,7 +471,17 @@ async function doCompile() {
   let pre = null;
   if (exd && kind === 'avr' && avrMcu(b) === 'uno') { const pk = await exampleHexText(exd.id); pre = pk ? { code: exd.code, ...pk } : null; }
   else if (exd) { const pw = exampleWasm(exd.id); pre = pw ? { code: exd.code, ...pw } : null; }
-  const res = await compile(code, { precompiled: pre, board: kind, mcu: avrMcu(b), libs: kind === 'avr' ? [] : state.libs, getLib: getZip, onProgress: (t) => { setCompilerState(t); $('#buildOut').textContent = t; } });
+  // compiling can take minutes (big .zip libraries): show it at once, keep a clock running, and let ■ cancel it
+  const ctl = new AbortController(); state.compileCtl = ctl; $('#btnStop').disabled = false;
+  const t0 = Date.now();
+  const tick = setInterval(() => { const s = Math.round((Date.now() - t0) / 1000); if (s >= 3) setStatus('busy', `Mengompilasi · ${s} s`); }, 1000);
+  const slow = setTimeout(() => addLog('info', `Mengompilasi di server${state.libs.length && kind !== 'avr' ? ' bersama library .zip (pertama kali bisa beberapa menit, berikutnya cepat)' : ''}… Tekan ■ untuk membatalkan.`), 4000);
+  let res;
+  try {
+    res = await compile(code, { precompiled: pre, board: kind, mcu: avrMcu(b), libs: kind === 'avr' ? [] : state.libs, getLib: getZip, signal: ctl.signal,
+      onProgress: (t) => { setCompilerState(t); $('#buildOut').textContent = t; } });
+  } finally { clearInterval(tick); clearTimeout(slow); state.compileCtl = null; if (!sim.running) $('#btnStop').disabled = true; }
+  if (res.source === 'cancel') { addLog('info', 'Kompilasi dibatalkan.'); setCompilerState('Dibatalkan'); setStatus('', 'Berhenti'); return false; }
   $('#buildOut').textContent = [res.stdout, res.stderr].filter(Boolean).join('\n') || '(tidak ada keluaran)';
   const diags = (res.diagnostics?.length ? res.diagnostics : parseDiagnostics(res.stderr)).map((d) => fixMissingSemicolon(d, code));
   editor.setMarks(diags);
@@ -532,7 +543,7 @@ async function run() {
   finally { state.busy = false; $('#btnRun').disabled = false; }
 }
 $('#btnRun').onclick = run; $('#btnRun2').onclick = run;
-$('#btnStop').onclick = () => stopSim('Simulasi dihentikan.');
+$('#btnStop').onclick = () => { if (state.compileCtl) { state.compileCtl.abort(); return; } stopSim('Simulasi dihentikan.'); };
 $('#btnReset').onclick = async () => {
   const b = boardOf();
   const prog = currentProg(b);
@@ -804,6 +815,87 @@ const exl = $('#examplesList');
 exl.innerHTML = EXAMPLE_GROUPS.map((g) => `<div class="ex-group">${esc(g)}</div>` + EXAMPLES.filter((e) => e.group === g).map((e) => `<button class="ex" data-ex="${e.id}"><b>${esc(e.title)}</b><span>${esc(e.desc)}</span>${e.tags ? `<div class="tagrow">${e.tags.map((t) => `<i>${esc(t)}</i>`).join('')}</div>` : ''}</button>`).join('')).join('');
 exl.onclick = (e) => { const b = e.target.closest('[data-ex]'); if (b) loadExample(b.dataset.ex); };
 
+// ------------------------------------------------------------------ library examples (Arduino IDE → File → Examples)
+// Built-in Arduino examples + the examples of every library the compiler has (static files made at build time by
+// scripts/collect_examples.mjs) and the examples inside the .zip libraries of this project (read from the zip).
+let libIdx = null, libIdxErr = '';
+const zipEx = new Map();   // sha -> { list, read }
+async function libIndex() {
+  if (libIdx || libIdxErr) return libIdx;
+  try { const r = await fetch('/libex/index.json', { cache: 'force-cache' }); if (!r.ok) throw new Error('HTTP ' + r.status); libIdx = await r.json(); }
+  catch (e) { libIdxErr = e.message; }
+  return libIdx;
+}
+async function zipExOf(l) {
+  if (zipEx.has(l.sha)) return zipEx.get(l.sha);
+  const blob = await getZip(l.sha); if (!blob) return null;
+  const z = await zipExamples(await blob.arrayBuffer()); zipEx.set(l.sha, z); return z;
+}
+function setExTab(t) {
+  $$('#exTabs [data-ext]').forEach((b) => b.classList.toggle('on', b.dataset.ext === t));
+  $('#examplesList').hidden = t !== 'proj'; $('#libExPane').hidden = t !== 'lib';
+  if (t === 'lib') renderLibEx();
+}
+$('#exTabs').onclick = (e) => { const b = e.target.closest('[data-ext]'); if (b) setExTab(b.dataset.ext); };
+const archOk = (arch, kind) => { const a = String(arch || '*').toLowerCase(); if (a.includes('*')) return true; const want = kind === 'avr' ? 'avr' : kind === 'esp8266' ? 'esp8266' : /rp2040/.test(kind) ? 'rp2040' : 'esp32'; return a.split(/[,\s]+/).includes(want); };
+async function renderLibEx(openId) {
+  const host = $('#libExList'), q = $('#libExSearch').value.trim().toLowerCase(), kind = runtimeOf(boardOf());
+  const match = (...xs) => !q || xs.some((x) => String(x).toLowerCase().includes(q));
+  const parts = [];
+  if (state.libs.length) {
+    const head = parts.push('<div class="libex-group">Library .zip di proyek ini</div>') - 1;
+    for (const l of state.libs) {
+      let z = null; try { z = await zipExOf(l); } catch { z = null; }
+      const items = (z?.list || []).map((x, i) => [x, i]).filter(([x]) => match(l.name, x.path));
+      if (q && !items.length) continue;
+
+      parts.push(`<details class="libex-lib"${q || openId === 'zip:' + l.sha ? ' open' : ''}><summary>${esc(l.name)}${l.edgeImpulse ? ' <span class="tag">Edge Impulse</span>' : ''}<span class="n">${z ? `${z.list.length} contoh` : 'file .zip tidak ada di perangkat ini'}</span></summary><div class="libex-items">${items.map(([x, i]) => `<button type="button" data-zipex="${l.sha}" data-i="${i}">${esc(x.path)}${x.multi ? '<i>+ file lain</i>' : ''}</button>`).join('') || '<span class="muted small">Tidak ada folder examples di zip ini.</span>'}</div></details>`);
+    }
+  }
+  if (parts.length === 1 && state.libs.length) parts.length = 0;
+  const idx = await libIndex();
+  if (!idx) parts.push(`<p class="muted small">Daftar contoh library belum tersedia di versi situs ini${libIdxErr ? ` (${esc(libIdxErr)})` : ''}. Daftar dibuat saat build di Vercel (scripts/collect_examples.mjs).</p>`);
+  else {
+    parts.push('<div class="libex-group">Arduino &amp; library bawaan simulator</div>');
+    for (const l of idx.libs) {
+      const items = l.examples.map((x, i) => [x, i]).filter(([x]) => match(l.name, l.id, x.path));
+      if (!items.length) continue;
+      const ok = archOk(l.arch, kind);
+      parts.push(`<details class="libex-lib"${q || openId === l.id ? ' open' : ''}><summary>${esc(l.name)}${ok ? '' : ` <span class="tag">${esc(String(l.arch).split(',')[0])}</span>`}<span class="n">${items.length}</span></summary><div class="libex-items">${items.map(([x, i]) => `<button type="button" data-libex="${esc(l.id)}" data-i="${i}">${esc(x.path)}${x.multi ? '<i>+ file lain</i>' : ''}</button>`).join('')}</div></details>`);
+    }
+  }
+  host.innerHTML = parts.join('') || '<p class="muted small">Tidak ada contoh yang cocok.</p>';
+}
+let libExT; $('#libExSearch').oninput = () => { clearTimeout(libExT); libExT = setTimeout(() => renderLibEx(), 200); };
+async function openLibExample(title, code, { multi, arch } = {}) {
+  const cur = editor.value.trim();
+  if (cur && cur !== DEFAULT_CODE.trim() && !state.exampleId && !confirm(`Ganti kode di editor dengan contoh "${title}"? Kode yang sekarang akan hilang (simpan dulu bila perlu).`)) return;
+  stopSim(); editor.value = code; editor.marks.clear(); state.exampleId = null; state.hex = null; state.wasm = null; state.hexFor = null; state.hexOnly = false;
+  addLog('info', `Contoh library dimuat: ${title}. Rangkaian tidak diubah: tambahkan komponennya di Desain (Auto wiring bisa membantu), lalu tekan Jalankan.`);
+  if (multi) addLog('warn', 'Contoh ini aslinya punya file tambahan (.h/.cpp) di foldernya. Editor simulator hanya memuat file .ino, jadi bagian dari file lain itu perlu disalin ke kode ini.');
+  const kind = runtimeOf(boardOf());
+  if (arch && boardOf() && !archOk(arch, kind)) addLog('warn', `Library ini dibuat untuk ${arch}; board di Desain (${boardOf().cat.name}) mungkin tidak cocok.`);
+  const needs = /#include\s*[<"](ESP8266WiFi|ESP8266WebServer)\.h/.test(code) ? 'ESP8266' : /#include\s*[<"](WiFi|esp_camera|esp_now|BluetoothSerial|WebServer|ESP32Servo|Preferences)\.h/.test(code) || /\bESP32\b/.test(title) ? 'ESP32' : '';
+  if (needs && kind === 'avr' && boardOf()) addLog('warn', `Contoh ini untuk ${needs}; board di Desain sekarang ${boardOf().cat.name}. Ganti board-nya dulu agar bisa dikompilasi.`);
+  if (/CAMERA_MODEL_|esp_camera\.h/.test(code) && !/esp32-cam/.test(boardOf()?.part.type || '')) addLog('info', 'Contoh ini memakai kamera: tambahkan board "ESP32-CAM (AI-Thinker)" di Desain. Gambar kamera diambil dari tab Kamera.');
+  setMode('code'); toast('Contoh dimuat ke editor.');
+  if (isNarrow()) { $('#workspace').classList.add('lp-closed'); $$('.rail-btn').forEach((b) => b.classList.remove('on')); }
+}
+$('#libExList').onclick = async (e) => {
+  const b = e.target.closest('[data-libex], [data-zipex]'); if (!b) return;
+  try {
+    if (b.dataset.libex) {
+      const l = libIdx.libs.find((x) => x.id === b.dataset.libex), x = l.examples[+b.dataset.i];
+      const r = await fetch(`/libex/${encodeURIComponent(l.id)}/${x.path.split('/').map(encodeURIComponent).join('/')}.ino`); if (!r.ok) throw new Error('HTTP ' + r.status);
+      await openLibExample(`${l.name} › ${x.path}`, await r.text(), { multi: x.multi, arch: l.arch });
+    } else {
+      const l = state.libs.find((x) => x.sha === b.dataset.zipex), z = await zipExOf(l), x = z.list[+b.dataset.i];
+      await openLibExample(`${l.name} › ${x.path}`, await z.read(x), { multi: x.multi });
+    }
+  } catch (err) { toast('Gagal membuka contoh: ' + err.message, true); }
+};
+function openLibExPanel(openId) { if (openId) $('#libExSearch').value = ''; showPanel('examples', true); setExTab('lib'); if (openId) renderLibEx(openId); }
+
 function closeMenus() { $$('.menu.open').forEach((m) => m.classList.remove('open')); }
 $$('.menu > .mb, #btnDevice').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const m = b.parentElement, o = m.classList.contains('open'); closeMenus(); if (!o) m.classList.add('open'); }));
 // language: the page reloads in the other language; the current project is carried over in sessionStorage
@@ -874,7 +966,7 @@ async function doAction(act) {
     case 'tidy-wires': toast(canvas.tidyWires() ? 'Semua kabel dirapikan (jalur siku).' : 'Belum ada kabel.'); break;
     case 'clear-wires': for (const w of [...canvas.wires]) if (!w.plug) canvas._removeWire(w, true); canvas.emit('change', { structural: true }); break;
     case 'help': openHelp(); break; case 'about': openAbout(); break;
-    case 'save': saveLocal(); break; case 'saved': openSaved(); break;
+    case 'save': saveLocal(); break; case 'saved': openSaved(); break; case 'libex': openLibExPanel(); break;
   }
 }
 $$('.menu-pop').forEach((m) => (m.onclick = (e) => { const b = e.target.closest('[data-act]'); if (b) { closeMenus(); doAction(b.dataset.act); } }));
@@ -973,7 +1065,7 @@ function openHelp() {
   <h4>Mode tampilan: Laptop, iPad, HP</h4><ul><li>Tombol layar di kanan atas memilih tata letak. <b>Otomatis</b> menyesuaikan perangkat. Di HP, panel ada di bilah bawah dan konsol bisa diperkecil. Memilih mode yang lebih kecil dari layar menampilkan pratinjau berbingkai (berguna bagi guru untuk melihat tampilan siswa di HP).</li><li><b>Bahasa</b>: tombol <b>ID</b>/<b>EN</b> di kanan atas (atau menu mode tampilan) mengganti bahasa antarmuka ke Bahasa Indonesia atau English, termasuk nama komponen, menu, pesan Log, dan panduan. Kode program tidak diterjemahkan. Proyek yang sedang dibuka tetap terbawa.</li></ul>
   <h4>Kanvas</h4><ul><li>Satu jari di area kosong: geser kanvas. Dua jari: cubit untuk zoom.</li><li>Seret komponen untuk memindah. Saat simulasi berjalan, seret lewat label nama di atasnya.</li><li>Tombol putar, duplikat, hapus, urungkan/ulangi ada di toolbar atas.</li><li><b>Simpan</b> (Ctrl+S) di kanan atas menyimpan proyek di perangkat ini; buka lagi lewat Berkas → <b>Proyek tersimpan</b>. Titik oranye di tombol Simpan berarti ada perubahan yang belum disimpan.</li></ul>
   <h4>Simulasi</h4><ul><li>Rangkai di <b>Desain</b>, tulis program di <b>Kode</b> (tombol <b>Auto kode</b> membuatkan program dari rangkaianmu), lalu tekan <b>Jalankan</b>. Simulasi berjalan langsung di kanvas Desain (2D maupun 3D); galat kompilasi muncul di Log dengan nomor baris yang bisa diketuk.</li><li>Ubah nilai sensor (suhu, jarak, kelembapan…) di panel Properti saat simulasi berjalan.</li><li>Kode dijalankan untuk Arduino Uno/Nano/Mega, Franzininho (ATtiny85), ESP32 DevKit, ESP32-CAM, NodeMCU / Wemos D1 mini (ESP8266), Raspberry Pi Pico dan Nano RP2040 Connect.</li></ul>
-  <h4>ESP32: WiFi, internet, Bluetooth, kamera</h4><ul><li><b>WiFi</b> tersimulasi: <code>WiFi.begin()</code> tersambung ±1 detik (nama/password bebas, mis. "Wokwi-GUEST"), IP 10.10.0.2.</li><li><b>Internet nyata</b>: <code>HTTPClient</code> (GET/POST, http/https) memakai koneksi iPad/laptop ini; layanan tanpa izin CORS otomatis lewat proxy simulator.</li><li><b>Blynk, Telegram, MQTT, ThingSpeak</b>: <code>WiFiClient</code> / <code>WiFiClientSecure</code> / <code>WiFiUDP</code> tersambung sungguhan lewat <b>gateway IoT</b> server kompilasi (seperti Wokwi), jadi library asli (BlynkSimpleEsp32, UniversalTelegramBot, PubSubClient…) dan API key asli langsung bisa dipakai.</li><li><b>Library</b>: <code>#include</code> library dari Arduino Library Manager diunduh otomatis. Library .zip (mis. Edge Impulse) ditambahkan di panel <b>Library</b>.</li><li><b>Bluetooth</b>: <code>BluetoothSerial</code> tersambung ke tab <b>Bluetooth</b> di konsol (seperti aplikasi Serial Bluetooth Terminal di HP).</li><li><b>ESP32-CAM</b>: <code>esp_camera_fb_get()</code> mengambil foto JPEG dari tab <b>Kamera</b>: kamera iPad/laptop, foto unggahan, atau gambar contoh.</li><li>Seperti ESP32 asli: ADC2 (GPIO 0, 2, 4, 12–15, 25–27) tidak bisa dibaca saat WiFi aktif — pakai GPIO 32–39. GPIO 34–39 hanya input. Logika 3,3 V.</li><li><b>Edge Impulse</b>: unggah ekspor "Arduino library" di panel Library; ESP32-CAM memakai gambar dari tab Kamera (<code>fmt2rgb888</code> didukung).</li><li>Belum didukung: WebServer / server di dalam ESP32 (gateway hanya koneksi keluar), Bluetooth BLE, FreeRTOS task. Waktu CPU diperkirakan, bukan akurat per siklus.</li></ul>`;
+  <h4>ESP32: WiFi, internet, Bluetooth, kamera</h4><ul><li><b>WiFi</b> tersimulasi: <code>WiFi.begin()</code> tersambung ±1 detik (nama/password bebas, mis. "Wokwi-GUEST"), IP 10.10.0.2.</li><li><b>Internet nyata</b>: <code>HTTPClient</code> (GET/POST, http/https) memakai koneksi iPad/laptop ini; layanan tanpa izin CORS otomatis lewat proxy simulator.</li><li><b>Blynk, Telegram, MQTT, ThingSpeak</b>: <code>WiFiClient</code> / <code>WiFiClientSecure</code> / <code>WiFiUDP</code> tersambung sungguhan lewat <b>gateway IoT</b> server kompilasi (seperti Wokwi), jadi library asli (BlynkSimpleEsp32, UniversalTelegramBot, PubSubClient…) dan API key asli langsung bisa dipakai.</li><li><b>Library</b>: <code>#include</code> library dari Arduino Library Manager diunduh otomatis. Library .zip (mis. Edge Impulse) ditambahkan di panel <b>Library</b>.</li><li><b>Bluetooth</b>: <code>BluetoothSerial</code> tersambung ke tab <b>Bluetooth</b> di konsol (seperti aplikasi Serial Bluetooth Terminal di HP).</li><li><b>ESP32-CAM</b>: <code>esp_camera_fb_get()</code> mengambil foto JPEG dari tab <b>Kamera</b>: kamera iPad/laptop, foto unggahan, atau gambar contoh.</li><li>Seperti ESP32 asli: ADC2 (GPIO 0, 2, 4, 12–15, 25–27) tidak bisa dibaca saat WiFi aktif — pakai GPIO 32–39. GPIO 34–39 hanya input. Logika 3,3 V.</li><li><b>Edge Impulse</b>: unggah ekspor "Arduino library" di panel Library; ESP32-CAM memakai gambar dari tab Kamera (<code>fmt2rgb888</code> didukung).</li><li><b>Contoh program library</b> (seperti Arduino IDE → File → Examples): Berkas → <b>Contoh dari library…</b> atau tab <b>Library</b> di panel Contoh. Isinya contoh bawaan Arduino, contoh semua library simulator, dan contoh di dalam file .zip yang kamu unggah (mis. <code>esp32_camera</code> dari ekspor Edge Impulse). Kode dibuka di tab Kode; rangkaiannya tetap disusun di Desain.</li><li><b>Kompilasi lama</b>: library besar (Edge Impulse) dikompilasi bertahap di server, pertama kali bisa beberapa menit. Waktu berjalan tampil di bilah status; tekan ■ untuk membatalkan. Kompilasi berikutnya cepat karena hasilnya disimpan di server.</li><li>Belum didukung: WebServer / server di dalam ESP32 (gateway hanya koneksi keluar), Bluetooth BLE, FreeRTOS task. Waktu CPU diperkirakan, bukan akurat per siklus.</li></ul>`;
   $('#dlgHelp').showModal();
 }
 function openAbout() {

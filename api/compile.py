@@ -63,7 +63,7 @@ else:
 sys.path.insert(0, SERVER)
 import compiler, compiler_wasm  # noqa: E402
 
-BUDGET = 240  # seconds of compiling per request (Hobby functions stop at 300 s)
+BUDGET = 200  # seconds per request from its start, unpacking + library download included (Hobby functions stop at 300 s)
 LIB_BASE = (os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL") or "").rstrip("/")
 
 
@@ -116,6 +116,7 @@ class handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             return self._send(400, {"hex": None, "wasm": None, "stdout": "", "stderr": "Permintaan tidak valid"})
+        t0 = time.time()
         try:
             if PACKED:  # unpack only the toolchain this request needs (avr-gcc for Uno/Nano, clang for the others)
                 _unpack("avr" if route == "build" else "wasi", TC)
@@ -127,7 +128,7 @@ class handler(BaseHTTPRequestHandler):
                     fetch_lib(sha)
                 except Exception as e:
                     return self._send(200, {"wasm": None, "stdout": "", "stderr": "sketch.ino:1:1: error: library %s… tidak bisa diambil: %s. Unggah ulang .zip-nya di panel Library." % (sha[:8], e)})
-            compiler_wasm.DEADLINE = time.time() + BUDGET
+            compiler_wasm.DEADLINE = t0 + BUDGET
             try:
                 r = compiler_wasm.compile_sketch_wasm(str(data.get("sketch", "")), str(data.get("board", "esp32")), libs)
             finally:

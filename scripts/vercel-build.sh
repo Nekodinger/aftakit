@@ -46,6 +46,10 @@ done
 [ -d Arduino-IRremote ] || git clone -q --depth 1 --branch v4.7.1 https://github.com/Arduino-IRremote/Arduino-IRremote.git   # master dropped IrReceiver.begin(pin, ENABLE_LED_FEEDBACK)
 [ -d Encoder ] || git clone -q --depth 1 --branch 1.4.4 https://github.com/PaulStoffregen/Encoder.git   # master no longer builds for AVR
 bash ../esp32rt/fastled_sim/make.sh FastLED   # FastLED + simulator platform for the WebAssembly boards -> server/esp32rt/FastLED
+# File → Examples like the Arduino IDE: the libraries' example sketches + the Arduino built-in examples become static
+# files of the web app (public/libex, loaded on demand) before the examples are removed from the compiler sources
+rm -rf /tmp/arduino-examples && git clone -q --depth 1 https://github.com/arduino/arduino-examples.git /tmp/arduino-examples || true
+node "$ROOT/scripts/collect_examples.mjs" . "$ROOT/public/libex" /tmp/arduino-examples || log "library examples index failed"
 # keep only what is compiled: drop documents / pictures that some libraries ship (TFMini-Plus has 16 MB of PDFs)
 find . \( -iname '*.pdf' -o -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.bmp' -o -iname '*.zip' \) -delete 2>/dev/null || true
 rm -rf TFMini-Plus/documents FastLED/docs FastLED/ci U8g2_Arduino/extras

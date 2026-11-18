@@ -177,6 +177,7 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line-2);
 .dot { width: 9px; height: 9px; border-radius: 50%; background: #9aa3b2; flex: none; }
 .dot.run { background: #22c55e; box-shadow: 0 0 8px #22c55eaa; animation: pulse 1.4s infinite; }
 .dot.err { background: var(--danger); } .dot.design { background: var(--warn); }
+.dot.busy { background: var(--accent); animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: .5; } }
 
 /* ------------------------------------------------ code view */
@@ -742,3 +743,24 @@ body.mode-pcb #toolbar .tb-group:not(.run-group):not(.v3-keep) { display: none; 
 :root[data-device="phone"] #emptyHint .eh-phone { display: inline; }
 :root[data-device="phone"] #emptyHint .eh-wide { display: none; }
 .viewport.wire-dragging, .viewport.wire-dragging * { cursor: grabbing !important; }
+
+/* examples panel: project examples / library examples (Arduino IDE → File → Examples) */
+.ex-tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-left: auto; }
+.ex-tabs button { padding: 4px 10px; font-size: 12px; background: transparent; color: var(--muted); border: 0; }
+.ex-tabs button.on { background: var(--accent); color: #fff; }
+#libExPane { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+#libExSearch { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; }
+.libex-note { margin: 0; }
+.libex-lib { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.libex-lib > summary { list-style: none; cursor: pointer; padding: 9px 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.libex-lib > summary::-webkit-details-marker { display: none; }
+.libex-lib > summary::before { content: '▸'; color: var(--muted); transition: transform .15s; }
+.libex-lib[open] > summary::before { transform: rotate(90deg); }
+.libex-lib > summary .n { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.libex-lib .tag { font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
+.libex-items { display: flex; flex-direction: column; padding: 0 8px 8px; }
+.libex-items button { text-align: left; background: transparent; border: 0; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; color: var(--text); display: flex; gap: 6px; align-items: center; }
+.libex-items button:hover { background: var(--accent-soft); }
+.libex-items button i { font-style: normal; font-size: 10.5px; color: var(--warn); margin-left: auto; }
+.libex-group { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); font-weight: 700; margin: 6px 2px 0; }
+.lib-ex-link { font-size: 12px; color: var(--accent); background: none; border: 0; padding: 2px 0; cursor: pointer; }

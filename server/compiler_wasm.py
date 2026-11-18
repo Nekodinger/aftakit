@@ -113,8 +113,36 @@ _lock = threading.RLock()
 
 
 def _run(cmd, cwd=None):
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT)
+    t = TIMEOUT
+    if DEADLINE:   # serverless slice: never run past the platform limit; the step is repeated in the next slice
+        t = max(5, min(t, DEADLINE + GRACE - time.time()))
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=t)
+    except subprocess.TimeoutExpired:
+        if DEADLINE:
+            raise Pending()
+        raise
     return p.returncode, p.stdout, p.stderr
+
+
+def _left():
+    return (DEADLINE - time.time()) if DEADLINE else 1e9
+
+
+_T0 = 0.0
+
+
+def _need(seconds):
+    """stop this slice before a step that may not fit in the time left. A slice that has only just started always
+    runs the step (with the whole budget plus GRACE), so a long step can never be postponed forever."""
+    if DEADLINE and _left() < seconds and time.time() - _T0 > 15:
+        raise Pending()
+
+
+def _stage(name, key):
+    """path of a cached build product (sketch object, linked module, optimised module) for this exact input"""
+    d = os.path.join(CACHE, "wasm_stage"); os.makedirs(d, exist_ok=True)
+    return os.path.join(d, hashlib.md5(key.encode()).hexdigest()[:16] + "_" + name)
 
 
 _SIG = None
@@ -149,6 +177,7 @@ class Pending(Exception):
 
 
 DEADLINE = None   # set per request by a serverless host (seconds since epoch)
+GRACE = 45         # seconds a running tool may go past DEADLINE (stays under the 300 s platform limit)
 
 
 def _compile_one(s, o, flags):
@@ -265,6 +294,8 @@ def compile_sketch_wasm(sketch, board="esp32", user_libs=()):
         return {"wasm": None, "stdout": "", "stderr": f"sketch.ino:1:1: error: board '{board}' tidak dikenal"}
     if not sketch or not sketch.strip():
         return {"wasm": None, "stdout": "", "stderr": "sketch.ino:1:1: error: sketch is empty"}
+    global _T0
+    _T0 = time.time()
     work = tempfile.mkdtemp(prefix="wsk_")
     try:
         body, _ = preprocess(sketch)
@@ -298,14 +329,28 @@ def compile_sketch_wasm(sketch, board="esp32", user_libs=()):
                         if not any(x["root"] == prov["root"] for x in libs):
                             libs.append(prov)
             incs = list(INC) + ["-I" + d for l in libs for d in l["inc"]]
-        obj = os.path.join(work, "sketch.o")
-        rc, so, se = _run([CXX, "-c"] + CXXFLAGS + BOARDS[board] + incs + ["-o", obj, cpp], cwd=work)
-        if rc != 0:
-            return {"wasm": None, "stdout": "\n".join(notes), "stderr": _fix(se or so, work)}
-        raw = os.path.join(work, "raw.wasm")
-        rc, so, se = _run([CXX] + CXXFLAGS + ["-mexec-model=reactor", "-Wl,--gc-sections", "-Wl,-z,stack-size=262144", "-o", raw, obj] + lib_o + rt, cwd=work)
-        if rc != 0:
-            return {"wasm": None, "stdout": "\n".join(notes), "stderr": _fix(se or so, work)}
+        # the last three steps are cached by their exact inputs, so a long build split over several serverless
+        # requests never repeats a finished step (a big Edge Impulse model can need minutes to link + optimise)
+        skey = _stable(" ".join(CXXFLAGS + BOARDS[board] + incs)) + _rt_sig() + hashlib.md5(body.encode()).hexdigest()
+        obj = _stage("sketch.o", skey)
+        if not os.path.exists(obj):
+            _need(20)
+            rc, so, se = _run([CXX, "-c"] + CXXFLAGS + BOARDS[board] + incs + ["-o", obj + ".tmp", cpp], cwd=work)
+            if rc != 0:
+                return {"wasm": None, "stdout": "\n".join(notes), "stderr": _fix(se or so, work)}
+            os.replace(obj + ".tmp", obj)
+        lkey = skey + "|" + "|".join(lib_o) + "|" + "|".join(rt)
+        raw = _stage("raw.wasm", lkey)
+        se = ""
+        if not os.path.exists(raw):
+            _need(40)
+            rc, so, se = _run([CXX] + CXXFLAGS + ["-mexec-model=reactor", "-Wl,--gc-sections", "-Wl,-z,stack-size=262144", "-o", raw + ".tmp", obj] + lib_o + rt, cwd=work)
+            if rc != 0:
+                return {"wasm": None, "stdout": "\n".join(notes), "stderr": _fix(se or so, work)}
+            os.replace(raw + ".tmp", raw)
+            open(raw + ".log", "w").write(se or "")
+        else:
+            se = open(raw + ".log").read() if os.path.exists(raw + ".log") else ""
         # a library whose header and source disagree on a function signature links into a trap in WebAssembly
         mism = sorted(set(re.findall(r"function signature mismatch: (\S+)", se or "")))
         if mism:
@@ -314,12 +359,16 @@ def compile_sketch_wasm(sketch, board="esp32", user_libs=()):
                 mism = [d.split("(")[0] for d in dem.strip().splitlines()]
         for fn in mism:
             notes.append("PERINGATAN: deklarasi dan definisi fungsi %s di library tidak cocok (bug library); program akan berhenti bila fungsi ini dipanggil. Perbarui library-nya (mis. ekspor ulang dari Edge Impulse)." % fn)
-        final = os.path.join(work, "sketch.wasm")
-        # --log-execution puts a call to ard.log_execution at every loop header: the host uses it as a watchdog so
-        # a busy loop such as `for(;;);` can be suspended (page stays responsive) instead of freezing the browser.
-        rc, so, se = _run([WASM_OPT, raw, "-O2", "--log-execution", "--asyncify", "--pass-arg=asyncify-imports@" + ASYNC_IMPORTS + ",ard.log_execution", "-O2", "-o", final])
-        if rc != 0:
-            return {"wasm": None, "stdout": "", "stderr": "wasm-opt: " + (se or so)}
+        final = _stage("final.wasm", lkey)
+        if not os.path.exists(final):
+            # wasm-opt (asyncify) is the slowest step for big programs: start it only with enough time left
+            _need(max(40, os.path.getsize(raw) / 1048576 * 45))
+            # --log-execution puts a call to ard.log_execution at every loop header: the host uses it as a watchdog so
+            # a busy loop such as `for(;;);` can be suspended (page stays responsive) instead of freezing the browser.
+            rc, so, se2 = _run([WASM_OPT, raw, "-O2", "--log-execution", "--asyncify", "--pass-arg=asyncify-imports@" + ASYNC_IMPORTS + ",ard.log_execution", "-O2", "-o", final + ".tmp"])
+            if rc != 0:
+                return {"wasm": None, "stdout": "", "stderr": "wasm-opt: " + (se2 or so)}
+            os.replace(final + ".tmp", final)
         data = open(final, "rb").read()
         info = "\n".join(notes + ["Sketch (simulator %s) %d byte WebAssembly." % (board.upper(), len(data))])
         return {"wasm": base64.b64encode(data).decode(), "stdout": info, "stderr": ""}
