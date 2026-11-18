@@ -78,3 +78,5 @@ static inline camera_fb_t *esp_camera_fb_get() {
   return &fb;
 }
 static inline void esp_camera_fb_return(camera_fb_t *) {}
+// as with the Arduino-ESP32 core, the JPEG/RGB converters (fmt2rgb888, frame2jpg …) are available after #include "esp_camera.h"
+#include "img_converters.h"

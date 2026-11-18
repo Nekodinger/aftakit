@@ -26,7 +26,7 @@ BOARDS = {"esp32": ["-DSIM_WASM", "-DESP32", "-DARDUINO_ARCH_ESP32", "-DARDUINO_
           "esp8266": ["-DSIM_WASM", "-DESP8266", "-DARDUINO_ARCH_ESP8266", "-DARDUINO_ESP8266_NODEMCU", "-DSIM_BOARD_ESP8266", "-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "esp32rt", "shim8266")],
           "rp2040": ["-DSIM_WASM", "-DARDUINO_ARCH_RP2040", "-DARDUINO_RASPBERRY_PI_PICO", "-DSIM_BOARD_RP2040"],
           "nanorp2040": ["-DSIM_WASM", "-DARDUINO_ARCH_RP2040", "-DARDUINO_NANO_RP2040_CONNECT", "-DSIM_BOARD_NANORP2040"]}
-COMMON = ["--target=wasm32-wasip1", "--sysroot=" + SYSROOT, "-O2", "-fno-exceptions", "-fno-rtti", "-D_WASI_EMULATED_SIGNAL",
+COMMON = ["--target=wasm32-wasip1", "--sysroot=" + SYSROOT, "-O2", "-fno-exceptions", "-fno-rtti", "-D_WASI_EMULATED_SIGNAL", "-DEI_CLASSIFIER_TFLITE_ENABLE_ESP_NN=0", "-DEI_CLASSIFIER_TFLITE_ENABLE_CMSIS_NN=0", "-DEI_PORTING_ESPRESSIF=0", "-DEIDSP_USE_ESP_DSP=0",
           "-DARDUINO=10819", "-Wno-everything", "-ffunction-sections", "-fdata-sections"]
 CXXFLAGS = ["-std=gnu++17", "-fno-threadsafe-statics"] + COMMON
 INC = ["-I" + os.path.join(RT, "core"), "-I" + os.path.join(RT, "shim"), "-I" + os.path.join(RT, "ArduinoJson", "src")]
@@ -362,7 +362,7 @@ def compile_sketch_wasm(sketch, board="esp32", user_libs=()):
         final = _stage("final.wasm", lkey)
         if not os.path.exists(final):
             # wasm-opt (asyncify) is the slowest step for big programs: start it only with enough time left
-            _need(max(40, os.path.getsize(raw) / 1048576 * 45))
+            _need(max(30, os.path.getsize(raw) / 1048576 * 12))
             # --log-execution puts a call to ard.log_execution at every loop header: the host uses it as a watchdog so
             # a busy loop such as `for(;;);` can be suspended (page stays responsive) instead of freezing the browser.
             rc, so, se2 = _run([WASM_OPT, raw, "-O2", "--log-execution", "--asyncify", "--pass-arg=asyncify-imports@" + ASYNC_IMPORTS + ",ard.log_execution", "-O2", "-o", final + ".tmp"])

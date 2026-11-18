@@ -94,4 +94,23 @@ void loop(){ while (Serial2.available()) { char c = Serial2.read(); Serial.write
   sim.ftdiPorts[0].send('halo esp\n'); await runMs(sim, 300);
   ok(term.includes('ESP32 siap') && sim.serial.includes('halo esp'), `ESP32 Serial2 <-> FTDI: term=${JSON.stringify(term)} serial=${JSON.stringify(sim.serial)}`);
 }
+// Edge Impulse Arduino exports (SDK 1.9x): ei_classifier_config.h includes "sdkconfig.h" on ESP32, and the
+// esp32_camera example calls fmt2rgb888() after only #include "esp_camera.h" (as the Arduino-ESP32 core allows)
+{
+  const wasm = compile(`#include "sdkconfig.h"
+#include "esp_camera.h"
+#if !defined(CONFIG_IDF_TARGET_ESP32)
+#error no target
+#endif
+void setup(){ Serial.begin(115200); static camera_config_t c = {}; c.pixel_format = PIXFORMAT_JPEG; c.frame_size = FRAMESIZE_QVGA;
+  Serial.println(esp_camera_init(&c) == ESP_OK ? "init ok" : "init gagal"); }
+void loop(){ camera_fb_t *fb = esp_camera_fb_get(); static uint8_t rgb[320*240*3];
+  bool ok = fb && fmt2rgb888(fb->buf, fb->len, PIXFORMAT_JPEG, rgb); if (fb) esp_camera_fb_return(fb);
+  Serial.printf("rgb=%d %s\\n", ok, CONFIG_IDF_TARGET); delay(1000); }`);
+  const sim = new Simulator(); const els = new Map([['cam', new Stub('mod-esp32-cam', ['5V', 'GND'])]]);
+  sim.serial = ''; sim.on('serial', (b) => (sim.serial += String.fromCharCode(b)));
+  sim.build({ parts: [{ id: 'cam', type: 'mod-esp32-cam', attrs: {}, left: 0, top: 0 }], connections: [] }, els);
+  await sim.loadWasm(wasm); sim.running = true; await runMs(sim, 1500);
+  ok(sim.serial.includes('init ok') && sim.serial.includes('rgb=1 esp32'), `sdkconfig.h + fmt2rgb888 from esp_camera.h: ${JSON.stringify(sim.serial.slice(-60))}`);
+}
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS'); process.exit(fails ? 1 : 0);
